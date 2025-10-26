@@ -427,6 +427,12 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="space-y-2">
                 <Button className="w-full" asChild>
+                  <Link href="/submit">
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Submission
+                  </Link>
+                </Button>
+                <Button variant="outline" className="w-full" asChild>
                   <Link href="/competitions">
                     <Trophy className="h-4 w-4 mr-2" />
                     Browse Competitions

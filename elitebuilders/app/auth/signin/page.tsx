@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
-import { createClient } from "@supabase/supabase-js"
+import { createBrowserClient } from "@supabase/ssr"
 
 export default function SignInPage() {
   const router = useRouter()
@@ -21,14 +21,14 @@ export default function SignInPage() {
   const redirect = searchParams.get("redirect") || "/dashboard"
 
   useEffect(() => {
-    // Initialize Supabase client
+    // Initialize Supabase client with SSR support
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
     if (supabaseUrl && supabaseKey) {
-      const client = createClient(supabaseUrl, supabaseKey)
+      const client = createBrowserClient(supabaseUrl, supabaseKey)
       setSupabase(client)
-      console.log("✅ Supabase client initialized")
+      console.log("✅ Supabase SSR browser client initialized")
     } else {
       console.error("❌ Missing Supabase environment variables")
       setError("Configuration error: Missing Supabase credentials")

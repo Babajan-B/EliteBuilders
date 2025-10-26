@@ -19,10 +19,15 @@ import {
   XCircle,
   UserPlus,
   Building2,
-  Gavel
+  Gavel,
+  FileText
 } from "lucide-react"
 import { getSupabaseBrowserClient } from "@/lib/supabase/client"
 import { useAuth } from "@/components/auth/auth-provider"
+import { AdminSubmissionCard } from "@/components/admin/admin-submission-card"
+import { AnalysisProgress } from "@/components/admin/analysis-progress"
+import { JudgesSponsorsManager } from "@/components/admin/judges-sponsors-manager"
+import { DetailedAnalysisReport } from "@/components/admin/detailed-analysis-report"
 
 interface Invitation {
   id: string
@@ -39,7 +44,11 @@ export default function AdminPage() {
   const { user, loading: authLoading } = useAuth()
   const [loading, setLoading] = useState(true)
   const [invitations, setInvitations] = useState<Invitation[]>([])
+  const [submissions, setSubmissions] = useState<any[]>([])
   const [sendingInvite, setSendingInvite] = useState(false)
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null)
+  const [showProgress, setShowProgress] = useState(false)
+  const [sendingId, setSendingId] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
@@ -59,12 +68,40 @@ export default function AdminPage() {
   useEffect(() => {
     if (user && user.role === "admin") {
       fetchInvitations()
+      fetchSubmissions()
     }
   }, [user])
 
+  async function fetchSubmissions() {
+    try {
+      const { data, error } = await supabase
+        .from("submissions")
+        .select(`
+          *,
+          challenges:challenge_id (
+            id,
+            title
+          ),
+          profiles:user_id (
+            id,
+            display_name
+          )
+        `)
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("Error fetching submissions:", error)
+      } else {
+        setSubmissions(data || [])
+      }
+    } catch (error) {
+      console.error("Error:", error)
+    }
+  }
+
   async function fetchInvitations() {
     try {
-      const response = await fetch("/api/admin/invite")
+      const response = await fetch("/api/admin/invite", { credentials: 'include' })
       if (response.ok) {
         const data = await response.json()
         if (data.ok) {
@@ -78,6 +115,66 @@ export default function AdminPage() {
     }
   }
 
+  async function handleAnalyzeSubmission(submissionId: string) {
+    setAnalyzingId(submissionId)
+    setShowProgress(true)
+    setError("")
+    setSuccess("")
+
+    try {
+      const response = await fetch('/api/submissions/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', // 🔑 Include cookies for auth
+        body: JSON.stringify({ submissionId }),
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setSuccess("✨ AI analysis completed successfully!")
+        // Refresh submissions after showing completion
+        setTimeout(async () => {
+          await fetchSubmissions()
+          setShowProgress(false)
+        }, 2000)
+      } else {
+        setError(data.error || "Failed to analyze submission")
+        setShowProgress(false)
+      }
+    } catch (err) {
+      setError("Failed to trigger AI analysis")
+      setShowProgress(false)
+    } finally {
+      setAnalyzingId(null)
+    }
+  }
+
+  async function handleSendToJudge(submissionId: string) {
+    setSendingId(submissionId)
+    setError("")
+    setSuccess("")
+
+    try {
+      const { error: updateError } = await supabase
+        .from("submissions")
+        .update({ status: 'READY_FOR_REVIEW' })
+        .eq("id", submissionId)
+
+      if (updateError) {
+        throw updateError
+      }
+
+      setSuccess("Submission sent to judge successfully!")
+      // Refresh submissions
+      await fetchSubmissions()
+    } catch (err) {
+      setError("Failed to send submission to judge")
+    } finally {
+      setSendingId(null)
+    }
+  }
+
   async function handleSendInvite(e: React.FormEvent) {
     e.preventDefault()
     setError("")
@@ -87,6 +184,7 @@ export default function AdminPage() {
     try {
       const response = await fetch("/api/admin/invite", {
         method: "POST",
+        credentials: 'include',
         headers: {
           "Content-Type": "application/json",
         },
@@ -201,8 +299,16 @@ export default function AdminPage() {
         </div>
 
         {/* Main Content */}
-        <Tabs defaultValue="send-invite" className="w-full">
+        <Tabs defaultValue="submissions" className="w-full">
           <TabsList className="mb-6">
+            <TabsTrigger value="submissions">
+              <FileText className="h-4 w-4 mr-2" />
+              Review Submissions
+            </TabsTrigger>
+            <TabsTrigger value="judges-sponsors">
+              <Users className="h-4 w-4 mr-2" />
+              Judges & Sponsors
+            </TabsTrigger>
             <TabsTrigger value="send-invite">
               <UserPlus className="h-4 w-4 mr-2" />
               Send Invitation
@@ -214,6 +320,56 @@ export default function AdminPage() {
               All ({invitations.length})
             </TabsTrigger>
           </TabsList>
+
+          {/* Submissions Review Tab */}
+          <TabsContent value="submissions">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Submission Review</CardTitle>
+                  <CardDescription>
+                    Review submissions, run AI analysis, and send to judges
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+
+              {/* Show Analysis Progress */}
+              {showProgress && analyzingId && (
+                <AnalysisProgress 
+                  submissionId={analyzingId}
+                  onComplete={() => {
+                    // Progress will auto-hide after fetch
+                  }}
+                />
+              )}
+
+              {submissions.length > 0 ? (
+                <div className="space-y-4">
+                  {submissions.map((submission) => (
+                    <AdminSubmissionCard
+                      key={submission.id}
+                      submission={submission}
+                      onAnalyze={handleAnalyzeSubmission}
+                      onSendToJudge={handleSendToJudge}
+                      analyzing={analyzingId === submission.id}
+                      sending={sendingId === submission.id}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <Card>
+                  <CardContent className="text-center py-12 text-muted-foreground">
+                    No submissions yet.
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* Judges & Sponsors Tab */}
+          <TabsContent value="judges-sponsors">
+            <JudgesSponsorsManager />
+          </TabsContent>
 
           {/* Send Invitation Tab */}
           <TabsContent value="send-invite">

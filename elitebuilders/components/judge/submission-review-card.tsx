@@ -495,7 +495,11 @@ export function SubmissionReviewCard({
           </div>
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
-            <span>Submitted {formatDistanceToNow(new Date(submission.submitted_at), { addSuffix: true })}</span>
+            <span>
+              Submitted {submission.submitted_at || submission.created_at 
+                ? formatDistanceToNow(new Date(submission.submitted_at || submission.created_at), { addSuffix: true })
+                : 'recently'}
+            </span>
           </div>
         </div>
 

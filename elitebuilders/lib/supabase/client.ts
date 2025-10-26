@@ -1,6 +1,6 @@
-import { createClient } from "@supabase/supabase-js"
+import { createBrowserClient } from "@supabase/ssr"
 
-let client: ReturnType<typeof createClient> | null = null
+let client: ReturnType<typeof createBrowserClient> | null = null
 
 export function getSupabaseBrowserClient() {
   if (client) {
@@ -21,14 +21,9 @@ export function getSupabaseBrowserClient() {
     throw new Error("Missing Supabase environment variables")
   }
 
-  client = createClient(supabaseUrl, supabaseKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-    },
-  })
+  client = createBrowserClient(supabaseUrl, supabaseKey)
 
-  console.log("✅ Supabase client created successfully")
+  console.log("✅ Supabase browser client created successfully")
 
   return client
 }

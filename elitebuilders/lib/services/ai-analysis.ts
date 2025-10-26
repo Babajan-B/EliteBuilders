@@ -1,9 +1,15 @@
 /**
  * AI Analysis Service
- * Automatically analyzes submissions using Gemini LLM
+ * Comprehensive submission analysis using multiple sources:
+ * - GitHub repository (code, README, dependencies, tests)
+ * - Pitch deck (presentation, problem/solution articulation)
+ * - Project writeup (description and claims)
+ * - [FUTURE] Demo video (OpenAI Whisper transcription)
  */
 
 import { scoreSubmissionWithLLM } from '@/lib/gemini-client';
+import { analyzeGitHubRepository, formatGitHubAnalysisForLLM } from '@/lib/github-analyzer';
+import { analyzePitchDeck, formatPitchDeckForLLM } from '@/lib/pitch-deck-analyzer';
 import { getSupabaseBrowserClient } from '@/lib/supabase/client';
 
 export interface SubmissionForAnalysis {
@@ -20,6 +26,7 @@ export interface AIAnalysisResult {
   score_llm: number;
   rubric_scores_json: Record<string, number>;
   rationale_md: string;
+  detailed_analysis?: any;
   ai_analyzed_at: string;
 }
 
@@ -47,41 +54,69 @@ export async function analyzeSubmissionWithAI(
       return null;
     }
 
+    const sub = submission as any; // Type cast for Supabase types
+
     // 2. Check if already analyzed
-    if (submission.ai_analyzed_at) {
+    if (sub.ai_analyzed_at) {
       console.log('[AI Analysis] Submission already analyzed, skipping');
       return {
-        score_llm: submission.score_llm,
-        rubric_scores_json: submission.rubric_scores_json,
-        rationale_md: submission.rationale_md,
-        ai_analyzed_at: submission.ai_analyzed_at,
+        score_llm: sub.score_llm,
+        rubric_scores_json: sub.rubric_scores_json,
+        rationale_md: sub.rationale_md,
+        ai_analyzed_at: sub.ai_analyzed_at,
       };
     }
 
-    // 3. Run AI analysis
-    console.log('[AI Analysis] Calling Gemini LLM...');
+    // 3. Update status to ANALYZING
+    console.log('[AI Analysis] Updating status to ANALYZING...');
+    await supabase
+      .from('submissions')
+      .update({ status: 'ANALYZING' } as any)
+      .eq('id', submissionId);
+
+    // 4. Analyze GitHub repository if URL provided
+    let githubAnalysisText = '';
+    if (sub.repo_url && sub.repo_url.includes('github.com')) {
+      console.log('[AI Analysis] Analyzing GitHub repository...');
+      try {
+        const githubAnalysis = await analyzeGitHubRepository(sub.repo_url);
+        githubAnalysisText = formatGitHubAnalysisForLLM(githubAnalysis);
+        console.log('[AI Analysis] GitHub analysis complete:', githubAnalysis.analysis_summary);
+      } catch (error) {
+        console.error('[AI Analysis] GitHub analysis failed:', error);
+        githubAnalysisText = '\\n⚠️ Could not analyze GitHub repository\\n';
+      }
+    } else {
+      console.log('[AI Analysis] No GitHub URL or non-GitHub repository');
+    }
+
+    // 5. Run AI analysis with GitHub data
+    console.log('[AI Analysis] Calling Gemini LLM with GitHub context...');
     const analysisResult = await scoreSubmissionWithLLM(
       {
-        repo_url: submission.repo_url,
-        deck_url: submission.deck_url,
-        demo_url: submission.demo_url,
-        writeup_md: submission.writeup_md,
+        repo_url: sub.repo_url,
+        deck_url: sub.deck_url,
+        demo_url: sub.demo_url,
+        writeup_md: sub.writeup_md,
       },
-      {} // rubric config (default rubric is used in gemini-client)
+      {}, // rubric config (default rubric is used in gemini-client)
+      githubAnalysisText // Pass GitHub analysis to LLM
     );
 
     console.log('[AI Analysis] LLM returned score:', analysisResult.score_llm);
 
-    // 4. Store results in database
+    // 6. Store results in database and update status to ANALYZED
     const now = new Date().toISOString();
     const { error: updateError } = await supabase
       .from('submissions')
       .update({
+        status: 'ANALYZED', // Update status after successful analysis
         score_llm: analysisResult.score_llm,
         rubric_scores_json: analysisResult.rubric_scores_json,
         rationale_md: analysisResult.rationale_md,
+        ai_detailed_analysis: analysisResult.detailed_analysis, // Store detailed analysis
         ai_analyzed_at: now,
-      })
+      } as any)
       .eq('id', submissionId);
 
     if (updateError) {
@@ -95,6 +130,7 @@ export async function analyzeSubmissionWithAI(
       score_llm: analysisResult.score_llm,
       rubric_scores_json: analysisResult.rubric_scores_json,
       rationale_md: analysisResult.rationale_md,
+      detailed_analysis: analysisResult.detailed_analysis,
       ai_analyzed_at: now,
     };
   } catch (error) {

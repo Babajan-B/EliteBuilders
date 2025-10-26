@@ -25,17 +25,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Competition is not active" }, { status: 400 })
     }
 
-    // Check for existing submission
-    const { data: existing } = await supabase
-      .from("submissions")
-      .select("id")
-      .eq("competition_id", competition_id)
-      .eq("user_id", user.id)
-      .single()
-
-    if (existing) {
-      return NextResponse.json({ error: "You have already submitted to this competition" }, { status: 400 })
-    }
+    // Allow multiple submissions per user per competition
+    // Removed the restriction that prevented resubmissions
 
     // Create submission
     const { data: submission, error } = await supabase
@@ -84,7 +75,7 @@ export async function PUT(request: Request) {
     // Verify ownership
     const { data: existing } = await supabase
       .from("submissions")
-      .select("user_id, competition_id, competitions(status)")
+      .select("user_id, competition_id")
       .eq("id", submission_id)
       .single()
 
@@ -92,7 +83,14 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 })
     }
 
-    if (existing.competitions?.status !== "active") {
+    // Check if competition is still active
+    const { data: competitionCheck } = await supabase
+      .from("competitions")
+      .select("status")
+      .eq("id", existing.competition_id)
+      .single()
+
+    if (!competitionCheck || competitionCheck.status !== "active") {
       return NextResponse.json({ error: "Competition is not active" }, { status: 400 })
     }
 

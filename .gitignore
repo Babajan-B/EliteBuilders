@@ -78,6 +78,9 @@ credentials/
 *_TESTING*.md
 *TEMP*.md
 
+# Archive directory with documentation and SQL migrations
+.archive/
+
 # Script files that may contain secrets
 test-*.js
 send-*.js

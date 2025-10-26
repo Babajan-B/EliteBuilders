@@ -15,42 +15,41 @@ export default function JudgeConsolePage() {
 
   useEffect(() => {
     async function fetchSubmissions() {
+      console.log("🔍 JUDGE: Starting fetch...")
       try {
-        // Fetch all submissions
+        // Fetch only submissions that are ready for judge review
         const { data, error } = await supabase
           .from("submissions")
-          .select("*")
+          .select(`
+            *,
+            challenges:challenge_id (
+              id,
+              title
+            ),
+            profiles:user_id (
+              id,
+              display_name
+            )
+          `)
+          .eq("status", "READY_FOR_REVIEW")  // Only show submissions sent by admin
           .order("created_at", { ascending: false })
 
+        console.log("🔍 JUDGE: Query result:", {
+          dataCount: data?.length,
+          error: error,
+          sampleData: data?.[0]
+        })
+
         if (error) {
-          console.error("Error fetching submissions:", error)
+          console.error("❌ JUDGE: Error fetching submissions:", error)
+          setAllSubmissions([])
         } else {
-          // Fetch challenge and profile details for each submission
-          const submissionsWithDetails = await Promise.all(
-            (data || []).map(async (submission) => {
-              const { data: challenge } = await supabase
-                .from("challenges")
-                .select("title")
-                .eq("challenge_id", submission.challenge_id)
-                .single()
-
-              const { data: profile } = await supabase
-                .from("profiles")
-                .select("display_name")
-                .eq("id", submission.user_id)
-                .single()
-
-              return {
-                ...submission,
-                challenges: challenge,
-                profiles: profile
-              }
-            })
-          )
-          setAllSubmissions(submissionsWithDetails)
+          console.log("✅ JUDGE: Fetched submissions:", data?.length || 0)
+          setAllSubmissions(data || [])
         }
       } catch (error) {
-        console.error("Error:", error)
+        console.error("❌ JUDGE: Unexpected error:", error)
+        setAllSubmissions([])
       } finally {
         setLoading(false)
       }

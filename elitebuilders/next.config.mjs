@@ -12,6 +12,10 @@ const nextConfig = {
       dynamic: 0,
       static: 0,
     },
+    turbopack: {
+      // Set the project root to silence multiple lockfiles warning
+      root: process.cwd(),
+    },
   },
 }
 

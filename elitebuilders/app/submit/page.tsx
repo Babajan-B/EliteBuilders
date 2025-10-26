@@ -104,17 +104,18 @@ export default function SubmitPage() {
       console.log("📤 SUBMIT: User ID:", user?.id)
       console.log("📤 SUBMIT: Form data:", formData)
 
-      // Create submission
+      // Create submission with PENDING status
       const { data: submission, error: submitError } = await supabase
         .from("submissions")
         .insert({
           challenge_id: selectedCompetitionId,
           user_id: user?.id,
-          repo_url: formData.repo_url,
-          deck_url: formData.deck_url || null,
-          demo_url: formData.demo_url || null,
-          writeup_md: formData.writeup_md,
-        })
+          repo_url: formData.repo_url || '',
+          deck_url: formData.deck_url || '',
+          demo_url: formData.demo_url || '',
+          writeup_md: formData.writeup_md || '',
+          status: 'PENDING'
+        } as any)
         .select()
         .single()
 
@@ -130,19 +131,10 @@ export default function SubmitPage() {
         throw new Error("Submission created but no data returned")
       }
 
-      console.log("✅ SUBMIT: Submission created successfully:", submission.id)
+      console.log("✅ SUBMIT: Submission created successfully:", (submission as any)?.id)
 
-      // Trigger AI analysis in the background (don't wait for it)
-      if (submission.id) {
-        console.log("🤖 SUBMIT: Triggering AI analysis...")
-        fetch('/api/submissions/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ submissionId: submission.id }),
-        }).catch(err => {
-          console.error('❌ SUBMIT: Failed to trigger AI analysis:', err)
-        })
-      }
+      // Don't trigger AI analysis automatically - Admin will review first
+      console.log("✅ SUBMIT: Submission sent to admin for review")
 
       setSuccess(true)
       console.log("✅ SUBMIT: Success! Redirecting in 2 seconds...")

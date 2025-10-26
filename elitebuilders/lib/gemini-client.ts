@@ -6,7 +6,7 @@
  */
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = 'gemini-2.5-flash'; // Latest Flash model, free tier, fast, good quality
+const GEMINI_MODEL = 'gemini-2.0-flash-exp'; // Experimental model (free tier, works well)
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 interface GeminiRequest {
@@ -135,10 +135,11 @@ export async function scoreSubmissionWithLLM(submission: {
   deck_url?: string | null;
   demo_url?: string | null;
   writeup_md?: string | null;
-}, rubric: Record<string, unknown>): Promise<{
+}, rubric: Record<string, unknown>, githubAnalysis?: string): Promise<{
   score_llm: number;
   rubric_scores_json: Record<string, number>;
   rationale_md: string;
+  detailed_analysis?: any;
 }> {
   // Build context for the LLM
   const repoInfo = submission.repo_url ? `Repository: ${submission.repo_url}` : 'No repository provided';
@@ -155,25 +156,79 @@ export async function scoreSubmissionWithLLM(submission: {
   // Construct the scoring prompt
   const prompt = `You are an expert hackathon judge evaluating a project submission. Your task is to provide fair, objective scores based on the rubric below.
 
+You have access to THREE PRIMARY SOURCES:
+1. 📝 PROJECT WRITEUP - Written description and claims
+2. 📂 GITHUB REPOSITORY - Actual code, README, dependencies, tests
+3. 📊 PITCH DECK - Presentation materials, problem/solution articulation
+
+Evaluate based on ALL available sources. Cross-verify claims with actual implementation.
+
 RUBRIC (Total: 60 points):
 1. Problem Fit (0-15 points): How well does the solution address the stated challenge? Is the problem clearly understood? Is the solution relevant and appropriate?
-2. Technical Depth (0-20 points): Code quality, architecture design, use of appropriate technologies, innovation in technical approach, implementation quality.
+
+2. Technical Depth (0-20 points): Code quality, architecture design, use of appropriate technologies, innovation in technical approach, implementation quality. 
+   CRITICAL: You have access to actual code - evaluate the REAL implementation.
+   - Check README quality and documentation
+   - Verify dependencies match claimed tech stack
+   - Assess code structure and quality
+   - Reward actual implementation over claims
+
 3. UX & Demo Quality (0-15 points): User experience design, demo presentation quality, ease of use, visual polish, documentation clarity.
+   - Pitch deck quality and professionalism
+   - README documentation completeness
+   - Code organization and structure
+   - Visual presentation of materials
+
 4. Impact & Clarity (0-10 points): Potential real-world impact, scalability, clarity of explanation, completeness of documentation.
+   - Pitch deck articulates problem/solution clearly
+   - README explains use cases and value proposition
+   - Overall professional presentation across all materials
 
 SUBMISSION DETAILS:
 ${repoInfo}
 ${deckInfo}
 ${demoInfo}
 
+${githubAnalysis || ''}
+
 PROJECT WRITEUP:
 ${truncatedWriteup}
 
-INSTRUCTIONS:
-1. Carefully evaluate the submission based on the information provided
-2. If a repository/demo is mentioned but not accessible, you can still evaluate based on the writeup
-3. If information is missing (e.g., no demo), score that aspect lower but fairly
-4. Provide specific, constructive feedback in your rationale
+EVALUATION INSTRUCTIONS:
+1. **Cross-Verify Everything**: Check if writeup claims match actual code and pitch deck
+   - Writeup says "AI-powered" → Verify in code (import tensorflow, openai, etc.)
+   - Pitch deck claims "scalable" → Check architecture in code
+   
+2. **Technical Depth Priority**: Base score on ACTUAL code, not claims
+   - Review README quality (installation, usage, features documented)
+   - Check dependencies (package.json/requirements.txt match claims)
+   - Verify main source file shows actual implementation
+   - Bonus points for tests, .env.example, LICENSE
+   
+3. **Reward Completeness**: All three sources provided = professionalism
+   - GitHub + Pitch Deck + Writeup = shows thorough preparation
+   - Missing GitHub = Major penalty (no way to verify claims)
+   - Missing Pitch Deck = Minor penalty (less professional presentation)
+   
+4. **Flag Discrepancies**: Be honest about mismatches
+   - "Writeup claims X but code shows Y"
+   - "Pitch deck promises X but GitHub repo has basic implementation"
+   
+5. **Be Fair & Specific**:
+   - Cite actual evidence: "README line 15 shows...", "requirements.txt includes..."
+   - Don't penalize small projects that are honest about scope
+   - Reward projects that match claims with implementation
+   
+6. **Presentation Quality**: Pitch deck matters for communication skills
+   - Clear problem/solution articulation
+   - Professional slides/document structure
+   - Shows ability to present technical work to non-technical audience
+
+SCORING PRIORITY:
+1. CODE QUALITY (GitHub) - Most important
+2. CLAIM VERIFICATION (Writeup vs Code) - Honesty matters
+3. PRESENTATION (Pitch Deck) - Communication skills
+4. DOCUMENTATION (README) - Usability and clarity
 
 Return ONLY a valid JSON object with this EXACT structure (no markdown, no code blocks):
 {
@@ -181,7 +236,21 @@ Return ONLY a valid JSON object with this EXACT structure (no markdown, no code 
   "tech_depth": <number 0-20>,
   "ux_flow": <number 0-15>,
   "impact": <number 0-10>,
-  "rationale": "<2-4 sentences explaining the scores, being specific about strengths and areas for improvement>"
+  "strengths": [
+    "Specific strength 1 with evidence (e.g., 'Well-documented README with clear setup instructions')",
+    "Specific strength 2 with evidence",
+    "Specific strength 3 with evidence"
+  ],
+  "weaknesses": [
+    "Specific weakness 1 with constructive feedback",
+    "Specific weakness 2 with suggestions",
+    "Specific weakness 3 if applicable"
+  ],
+  "code_quality_notes": "Brief assessment of code structure, patterns, and best practices observed",
+  "tech_stack_verification": "Match between claimed tech stack and actual dependencies (be specific)",
+  "documentation_quality": "Assessment of README, comments, and overall documentation",
+  "recommendation": "STRONG_ACCEPT | ACCEPT | BORDERLINE | REJECT with brief justification",
+  "rationale": "2-3 paragraph detailed evaluation covering all aspects and providing specific examples from the code"
 }`;
 
   try {
@@ -212,6 +281,25 @@ Return ONLY a valid JSON object with this EXACT structure (no markdown, no code 
     const totalScore = problemFit + techDepth + uxFlow + impact;
     const rationale = parsed.rationale || 'LLM evaluation completed';
 
+    // Build detailed analysis object
+    const detailedAnalysis = {
+      scores: {
+        problem_fit: problemFit,
+        tech_depth: techDepth,
+        ux_flow: uxFlow,
+        impact: impact,
+        total: totalScore
+      },
+      strengths: parsed.strengths || [],
+      weaknesses: parsed.weaknesses || [],
+      code_quality_notes: parsed.code_quality_notes || '',
+      tech_stack_verification: parsed.tech_stack_verification || '',
+      documentation_quality: parsed.documentation_quality || '',
+      recommendation: parsed.recommendation || 'PENDING',
+      rationale: rationale,
+      analyzed_at: new Date().toISOString()
+    };
+
     return {
       score_llm: totalScore,
       rubric_scores_json: {
@@ -221,6 +309,7 @@ Return ONLY a valid JSON object with this EXACT structure (no markdown, no code 
         impact: impact,
       },
       rationale_md: rationale,
+      detailed_analysis: detailedAnalysis, // Add as separate field
     };
   } catch (error) {
     console.error('Error in Gemini LLM scoring:', error);

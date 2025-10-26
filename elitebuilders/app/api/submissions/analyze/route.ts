@@ -8,10 +8,13 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { analyzeSubmissionWithAI } from '@/lib/services/ai-analysis';
-import { getSupabaseBrowserClient } from '@/lib/supabase/client';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('🚀 POST /api/submissions/analyze - Starting...');
+
     const body = await request.json();
     const { submissionId } = body;
 
@@ -22,18 +25,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify user is authenticated
-    const supabase = getSupabaseBrowserClient();
+    // Create Supabase client with cookies
+    console.log('👤 Creating Supabase client with cookies...');
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) =>
+                cookieStore.set(name, value, options)
+              )
+            } catch {}
+          },
+        },
+      }
+    );
+
+    // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
+    console.log('[API] Auth check:', { hasUser: !!user, error: authError?.message });
+
     if (authError || !user) {
+      console.log('[API] ❌ Not authenticated');
       return NextResponse.json(
-        { error: 'Unauthorized' },
+        { error: 'Unauthorized - Please sign in' },
         { status: 401 }
       );
     }
 
-    // Verify user owns this submission or is admin/judge
+    // Get user profile to check role
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single();
+
+    console.log('[API] User role:', profile?.role);
+
+    if (!profile || profile.role !== 'admin') {
+      console.log('[API] ❌ Not admin. Role:', profile?.role);
+      return NextResponse.json(
+        { error: 'Forbidden - Admin access required' },
+        { status: 403 }
+      );
+    }
+
+    console.log(`✅ Authenticated: ${user.email} (${profile.role})`);
+
+    // Verify submission exists
     const { data: submission, error: submissionError } = await supabase
       .from('submissions')
       .select('user_id')
@@ -47,52 +93,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if user owns the submission
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    const isOwner = submission.user_id === user.id;
-    const isJudgeOrAdmin = profile?.role === 'judge' || profile?.role === 'admin';
-
-    if (!isOwner && !isJudgeOrAdmin) {
-      return NextResponse.json(
-        { error: 'Forbidden: You do not have permission to analyze this submission' },
-        { status: 403 }
-      );
-    }
-
-    // Trigger AI analysis
-    console.log(`[API] Triggering AI analysis for submission ${submissionId}`);
+    // Trigger AI analysis with progress tracking
+    console.log(`[API] 🚀 Triggering AI analysis for submission ${submissionId}`);
+    console.log(`[API] 👤 Requested by: ${user.email} (${user.role})`);
+    
     const result = await analyzeSubmissionWithAI(submissionId);
 
     if (!result) {
+      console.error(`[API] ❌ AI analysis failed for submission ${submissionId}`);
       return NextResponse.json(
         { error: 'AI analysis failed' },
         { status: 500 }
       );
     }
+    
+    console.log(`[API] ✅ AI analysis completed for submission ${submissionId}`);
 
-    // Return success (but don't include detailed results for non-judges)
-    const response: any = {
+    return NextResponse.json({
       success: true,
       submissionId,
       analyzed: true,
-    };
-
-    // Only include detailed results for judges/admins
-    if (isJudgeOrAdmin) {
-      response.analysis = result;
-    } else {
-      // For submission owners, only return basic info
-      response.message = 'Submission analyzed successfully. Results will be reviewed by judges.';
-    }
-
-    return NextResponse.json(response, { status: 200 });
+      analysis: result,
+    }, { status: 200 });
   } catch (error) {
-    console.error('[API] Error in AI analysis endpoint:', error);
+    console.error('[API] ❌ Error in AI analysis endpoint:', error);
     return NextResponse.json(
       { error: 'Internal server error', details: (error as Error).message },
       { status: 500 }
@@ -116,7 +140,28 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseBrowserClient();
+    // Create Supabase client with cookies
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) =>
+                cookieStore.set(name, value, options)
+              )
+            } catch {}
+          },
+        },
+      }
+    );
+
+    // Verify authentication
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     if (authError || !user) {
