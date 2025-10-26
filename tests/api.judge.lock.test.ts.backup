@@ -1,0 +1,613 @@
+/**
+ * Test: Judge Lock API
+ * Tests PATCH /api/judge/lock with judge verification and score adjustments
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Set up environment variables
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
+
+// Mock submission data
+const mockProvisionalSubmission = {
+  id: 'submission-1',
+  challenge_id: 'challenge-1',
+  status: 'PROVISIONAL',
+  autoscores: { score_auto: 20 },
+  llmscores: { score_llm: 60 },
+};
+
+const mockFinalSubmission = {
+  id: 'submission-2',
+  challenge_id: 'challenge-1',
+  status: 'FINAL',
+  autoscores: { score_auto: 20 },
+  llmscores: { score_llm: 60 },
+};
+
+const mockQueuedSubmission = {
+  id: 'submission-3',
+  challenge_id: 'challenge-1',
+  status: 'QUEUED',
+  autoscores: null,
+  llmscores: null,
+};
+
+let mockSubmissionResponse: any = { data: mockProvisionalSubmission, error: null };
+let mockReviewUpsert = vi.fn(() => ({
+  select: vi.fn(() => ({
+    single: vi.fn(() => ({
+      data: {
+        submission_id: 'submission-1',
+        judge_id: 'test-user-id',
+        locked_at: new Date().toISOString(),
+      },
+      error: null,
+    })),
+  })),
+}));
+let mockStatusUpdate = vi.fn(() => ({ data: {}, error: null }));
+let mockIsAssignedJudge = true;
+
+// Mock Supabase client
+const mockSupabaseClient = {
+  from: vi.fn((table: string) => {
+    if (table === 'submissions') {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            single: vi.fn(() => mockSubmissionResponse),
+          })),
+        })),
+        update: vi.fn(() => ({
+          eq: mockStatusUpdate,
+        })),
+      };
+    }
+    if (table === 'judge_reviews') {
+      return {
+        upsert: mockReviewUpsert,
+      };
+    }
+    if (table === 'challenge_judges') {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              single: vi.fn(() => ({
+                data: mockIsAssignedJudge ? { judge_id: 'test-user-id' } : null,
+                error: mockIsAssignedJudge ? null : { message: 'Not found' },
+              })),
+            })),
+          })),
+        })),
+      };
+    }
+    return {
+      select: vi.fn(() => ({})),
+    };
+  }),
+};
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(() => mockSupabaseClient),
+}));
+
+vi.mock('next/headers', () => ({
+  cookies: vi.fn(async () => ({
+    toString: () => '',
+  })),
+}));
+
+// Mock auth
+vi.mock('@/lib/auth', () => ({
+  requireAuth: vi.fn(async () => ({
+    id: 'test-user-id',
+    email: 'test@example.com',
+    role: 'judge',
+  })),
+  isAssignedJudge: vi.fn(async () => mockIsAssignedJudge),
+}));
+
+// Import after mocks are set up
+import { PATCH } from '../app/api/judge/lock/route';
+
+describe('PATCH /api/judge/lock', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset to defaults
+    mockSubmissionResponse = { data: mockProvisionalSubmission, error: null };
+    mockIsAssignedJudge = true;
+    mockReviewUpsert = vi.fn(() => ({
+      select: vi.fn(() => ({
+        single: vi.fn(() => ({
+          data: {
+            submission_id: 'submission-1',
+            judge_id: 'test-user-id',
+            locked_at: new Date().toISOString(),
+          },
+          error: null,
+        })),
+      })),
+    }));
+    mockStatusUpdate = vi.fn(() => ({ data: {}, error: null }));
+  });
+
+  describe('Judge verification', () => {
+    it('should allow assigned judge to lock submission', async () => {
+      mockIsAssignedJudge = true;
+
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 5,
+        notes_md: 'Excellent implementation with good documentation.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data).toHaveProperty('submission_id');
+      expect(json.data.status).toBe('FINAL');
+    });
+
+    it('should reject non-assigned judge', async () => {
+      mockIsAssignedJudge = false;
+
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 5,
+        notes_md: 'Attempting to lock without permission.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('FORBIDDEN');
+      expect(json.error.message).toContain('assigned judges');
+    });
+  });
+
+  describe('Delta percentage clamping', () => {
+    it('should accept delta_pct within -20 to +20 range', async () => {
+      const testCases = [-20, -10, 0, 10, 20];
+
+      for (const delta_pct of testCases) {
+        const requestBody = {
+          submissionId: 'submission-1',
+          delta_pct,
+          notes_md: `Testing delta_pct = ${delta_pct}`,
+        };
+
+        const request = new Request('http://localhost:3000/api/judge/lock', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        const response = await PATCH(request);
+        const json = await response.json();
+
+        expect(json.ok).toBe(true);
+        expect(json.data.delta_pct).toBe(delta_pct);
+      }
+    });
+
+    it('should reject delta_pct below -20', async () => {
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: -21,
+        notes_md: 'Attempting invalid adjustment.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('should reject delta_pct above +20', async () => {
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 21,
+        notes_md: 'Attempting invalid adjustment.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('VALIDATION_ERROR');
+    });
+  });
+
+  describe('Final score computation', () => {
+    it('should compute final score with positive delta', async () => {
+      // Provisional = 0.2*20 + 0.6*60 = 4 + 36 = 40
+      // Final = 40 * (1 + 10/100) = 40 * 1.1 = 44
+
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 10,
+        notes_md: 'Great work, deserves bonus.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.provisional_score).toBe(40);
+      expect(json.data.final_score).toBe(44);
+    });
+
+    it('should compute final score with negative delta', async () => {
+      // Provisional = 40
+      // Final = 40 * (1 - 15/100) = 40 * 0.85 = 34
+
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: -15,
+        notes_md: 'Needs improvement in several areas.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.provisional_score).toBe(40);
+      expect(json.data.final_score).toBe(34);
+    });
+
+    it('should compute final score with zero delta', async () => {
+      // Provisional = 40
+      // Final = 40 * (1 + 0/100) = 40
+
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 0,
+        notes_md: 'Score is accurate as-is.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.provisional_score).toBe(40);
+      expect(json.data.final_score).toBe(40);
+    });
+
+    it('should clamp final score to 0-100 range', async () => {
+      // Edge case: high provisional with max negative delta
+      const highSubmission = {
+        id: 'submission-high',
+        challenge_id: 'challenge-1',
+        status: 'PROVISIONAL',
+        autoscores: { score_auto: 5 },
+        llmscores: { score_llm: 10 },
+      };
+      mockSubmissionResponse = { data: highSubmission, error: null };
+
+      // Provisional = 0.2*5 + 0.6*10 = 1 + 6 = 7
+      // With -20%: 7 * 0.8 = 5.6 (should not go below 0)
+
+      const requestBody = {
+        submissionId: 'submission-high',
+        delta_pct: -20,
+        notes_md: 'Maximum penalty applied.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.final_score).toBeGreaterThanOrEqual(0);
+      expect(json.data.final_score).toBeLessThanOrEqual(100);
+    });
+  });
+
+  describe('Status updates', () => {
+    it('should update submission status to FINAL', async () => {
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 0,
+        notes_md: 'Locking submission.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.status).toBe('FINAL');
+
+      // Verify status update was called
+      expect(mockStatusUpdate).toHaveBeenCalledWith('submission-1');
+    });
+
+    it('should create judge_reviews record with locked_bool=true', async () => {
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 5,
+        notes_md: 'Well-documented and functional.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      await PATCH(request);
+
+      // Verify judge review was upserted with correct data
+      expect(mockReviewUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          submission_id: 'submission-1',
+          judge_id: 'test-user-id',
+          delta_pct: 5,
+          notes_md: 'Well-documented and functional.',
+          locked_bool: true,
+          final_score: expect.any(Number),
+          locked_at: expect.any(String),
+        }),
+        { onConflict: 'submission_id' }
+      );
+    });
+
+    it('should reject locking already FINAL submission', async () => {
+      mockSubmissionResponse = { data: mockFinalSubmission, error: null };
+
+      const requestBody = {
+        submissionId: 'submission-2',
+        delta_pct: 0,
+        notes_md: 'Attempting to re-lock.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('BAD_REQUEST');
+      expect(json.error.message).toContain('PROVISIONAL state');
+    });
+
+    it('should reject locking QUEUED/SCORING submission', async () => {
+      mockSubmissionResponse = { data: mockQueuedSubmission, error: null };
+
+      const requestBody = {
+        submissionId: 'submission-3',
+        delta_pct: 0,
+        notes_md: 'Premature locking attempt.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('BAD_REQUEST');
+      expect(json.error.message).toContain('PROVISIONAL state');
+    });
+  });
+
+  describe('Error handling', () => {
+    it('should reject invalid submissionId format', async () => {
+      const requestBody = {
+        submissionId: 'not-a-uuid',
+        delta_pct: 0,
+        notes_md: 'Test notes with sufficient length to pass validation.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('should reject notes_md shorter than 10 chars', async () => {
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 0,
+        notes_md: 'Short',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('should handle submission not found', async () => {
+      mockSubmissionResponse = { data: null, error: { message: 'Not found' } };
+
+      const requestBody = {
+        submissionId: 'nonexistent-submission',
+        delta_pct: 0,
+        notes_md: 'Valid notes here.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('NOT_FOUND');
+      expect(json.error.message).toContain('Submission not found');
+    });
+
+    it('should handle judge review upsert failure', async () => {
+      mockReviewUpsert = vi.fn(() => ({
+        select: vi.fn(() => ({
+          single: vi.fn(() => ({
+            data: null,
+            error: { message: 'DB error' },
+          })),
+        })),
+      })) as any;
+
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 0,
+        notes_md: 'Valid notes.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('INTERNAL_ERROR');
+      expect(json.error.message).toContain('Failed to lock judge review');
+    });
+
+    it('should handle status update failure', async () => {
+      mockStatusUpdate = vi.fn(() => ({
+        data: null,
+        error: { message: 'Update failed' },
+      })) as any;
+
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 0,
+        notes_md: 'Valid notes.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('INTERNAL_ERROR');
+      expect(json.error.message).toContain('Failed to update submission status');
+    });
+  });
+
+  describe('Complete lock workflow', () => {
+    it('should complete full judge lock workflow successfully', async () => {
+      const requestBody = {
+        submissionId: 'submission-1',
+        delta_pct: 8,
+        notes_md: 'Excellent submission with minor improvements possible. Well documented and functional.',
+      };
+
+      const request = new Request('http://localhost:3000/api/judge/lock', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await PATCH(request);
+      const json = await response.json();
+
+      // Verify response structure
+      expect(json.ok).toBe(true);
+      expect(json.data).toHaveProperty('submission_id', 'submission-1');
+      expect(json.data).toHaveProperty('provisional_score');
+      expect(json.data).toHaveProperty('delta_pct', 8);
+      expect(json.data).toHaveProperty('final_score');
+      expect(json.data).toHaveProperty('status', 'FINAL');
+      expect(json.data).toHaveProperty('locked_at');
+
+      // Verify all operations were called
+      expect(mockReviewUpsert).toHaveBeenCalledTimes(1);
+      expect(mockStatusUpdate).toHaveBeenCalledTimes(1);
+    });
+  });
+});

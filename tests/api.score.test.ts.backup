@@ -1,0 +1,477 @@
+/**
+ * Test: Score API
+ * Tests AutoScore + LLM stub computation and status updates
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Set up environment variables
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
+
+// Mock submission data
+const mockFullSubmission = {
+  id: 'submission-1',
+  user_id: 'user-1',
+  challenge_id: 'challenge-1',
+  repo_url: 'https://github.com/test/repo',
+  deck_url: 'https://deck.test',
+  demo_url: 'https://demo.test',
+  writeup_md: 'A'.repeat(600), // 600 chars - should pass writeup check (>= 400)
+  status: 'SCORING',
+  challenges: {
+    rubric_json: {
+      demo: 15,
+      functionality: 20,
+    },
+  },
+};
+
+const mockPartialSubmission = {
+  id: 'submission-2',
+  user_id: 'user-1',
+  challenge_id: 'challenge-1',
+  repo_url: 'https://github.com/test/repo',
+  deck_url: null,
+  demo_url: null,
+  writeup_md: 'Short writeup', // < 400 chars
+  status: 'SCORING',
+  challenges: {
+    rubric_json: {},
+  },
+};
+
+const mockFinalSubmission = {
+  id: 'submission-3',
+  user_id: 'user-1',
+  challenge_id: 'challenge-1',
+  repo_url: 'https://github.com/test/repo',
+  status: 'FINAL',
+  challenges: {
+    rubric_json: {},
+  },
+};
+
+let mockSubmissionResponse: any = { data: mockFullSubmission, error: null };
+let mockAutoScoreUpsert = vi.fn(() => ({ data: {}, error: null }));
+let mockLLMScoreUpsert = vi.fn(() => ({ data: {}, error: null }));
+let mockStatusUpdate = vi.fn(() => ({ data: {}, error: null }));
+
+// Mock Supabase client
+const mockSupabaseClient = {
+  from: vi.fn((table: string) => {
+    if (table === 'submissions') {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            single: vi.fn(() => mockSubmissionResponse),
+          })),
+        })),
+        update: vi.fn(() => ({
+          eq: mockStatusUpdate,
+        })),
+      };
+    }
+    if (table === 'autoscores') {
+      return {
+        upsert: mockAutoScoreUpsert,
+      };
+    }
+    if (table === 'llmscores') {
+      return {
+        upsert: mockLLMScoreUpsert,
+      };
+    }
+    return {
+      select: vi.fn(() => ({})),
+    };
+  }),
+};
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(() => mockSupabaseClient),
+}));
+
+vi.mock('next/headers', () => ({
+  cookies: vi.fn(async () => ({
+    toString: () => '',
+  })),
+}));
+
+// Import after mocks are set up
+import { POST } from '../app/api/score/route';
+
+describe('POST /api/score', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset to default full submission
+    mockSubmissionResponse = { data: mockFullSubmission, error: null };
+    mockAutoScoreUpsert = vi.fn(() => ({ data: {}, error: null }));
+    mockLLMScoreUpsert = vi.fn(() => ({ data: {}, error: null }));
+    mockStatusUpdate = vi.fn(() => ({ data: {}, error: null }));
+  });
+
+  describe('AutoScore computation', () => {
+    it('should compute full AutoScore (20) when all fields present', async () => {
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.score_auto).toBe(20); // repo + deck + demo + writeup (5 each)
+
+      // Verify autoscores upsert was called with correct data
+      expect(mockAutoScoreUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          submission_id: 'submission-1',
+          score_auto: 20,
+          checks_json: expect.objectContaining({
+            has_repo: true,
+            has_deck: true,
+            has_demo: true,
+            has_writeup: true,
+          }),
+        }),
+        { onConflict: 'submission_id' }
+      );
+    });
+
+    it('should compute partial AutoScore when some fields missing', async () => {
+      mockSubmissionResponse = { data: mockPartialSubmission, error: null };
+
+      const requestBody = { submissionId: 'submission-2' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.score_auto).toBe(5); // Only repo present (deck, demo, writeup missing)
+
+      expect(mockAutoScoreUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          score_auto: 5,
+          checks_json: expect.objectContaining({
+            has_repo: true,
+            has_deck: false,
+            has_demo: false,
+            has_writeup: false, // < 400 chars
+          }),
+        }),
+        { onConflict: 'submission_id' }
+      );
+    });
+
+    it('should require writeup >= 400 chars for writeup check', async () => {
+      const shortWriteupSubmission = {
+        ...mockFullSubmission,
+        writeup_md: 'A'.repeat(399), // Just below threshold
+      };
+      mockSubmissionResponse = { data: shortWriteupSubmission, error: null };
+
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.score_auto).toBe(15); // repo + deck + demo, no writeup
+    });
+  });
+
+  describe('LLM Score computation (stub)', () => {
+    it('should compute LLM score based on writeup length', async () => {
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.score_llm).toBeGreaterThan(0);
+      expect(json.data.score_llm).toBeLessThanOrEqual(60);
+
+      // Verify llmscores upsert was called
+      expect(mockLLMScoreUpsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          submission_id: 'submission-1',
+          score_llm: expect.any(Number),
+          rubric_scores_json: expect.objectContaining({
+            demo_clarity: expect.any(Number),
+            functionality: expect.any(Number),
+            reproducibility: expect.any(Number),
+            impact: expect.any(Number),
+          }),
+          rationale_md: expect.stringContaining('STUB SCORING'),
+          model_id: 'stub',
+          model_version: 'v1.0-deterministic',
+        }),
+        { onConflict: 'submission_id' }
+      );
+    });
+
+    it('should include rubric breakdown in LLM score', async () => {
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      await POST(request);
+
+      const upsertCall = (mockLLMScoreUpsert.mock.calls as any)[0][0];
+      expect(upsertCall).toBeDefined();
+      const rubricScores = upsertCall.rubric_scores_json;
+
+      expect(rubricScores).toHaveProperty('demo_clarity');
+      expect(rubricScores).toHaveProperty('functionality');
+      expect(rubricScores).toHaveProperty('reproducibility');
+      expect(rubricScores).toHaveProperty('impact');
+
+      // Verify max values according to rubric
+      expect(rubricScores.demo_clarity).toBeLessThanOrEqual(15);
+      expect(rubricScores.functionality).toBeLessThanOrEqual(20);
+      expect(rubricScores.reproducibility).toBeLessThanOrEqual(15);
+      expect(rubricScores.impact).toBeLessThanOrEqual(10);
+    });
+
+    it('should handle empty writeup gracefully', async () => {
+      const emptyWriteupSubmission = {
+        ...mockFullSubmission,
+        writeup_md: null,
+      };
+      mockSubmissionResponse = { data: emptyWriteupSubmission, error: null };
+
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.score_llm).toBe(0); // No writeup = 0 LLM score
+    });
+  });
+
+  describe('Status updates', () => {
+    it('should update submission status to PROVISIONAL after scoring', async () => {
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(true);
+      expect(json.data.status).toBe('PROVISIONAL');
+
+      // Verify status update was called
+      expect(mockStatusUpdate).toHaveBeenCalledWith('submission-1');
+    });
+
+    it('should reject scoring for already FINAL submissions', async () => {
+      mockSubmissionResponse = { data: mockFinalSubmission, error: null };
+
+      const requestBody = { submissionId: 'submission-3' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('BAD_REQUEST');
+      expect(json.error.message).toContain('already finalized');
+
+      // Verify no scores were saved
+      expect(mockAutoScoreUpsert).not.toHaveBeenCalled();
+      expect(mockLLMScoreUpsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Error handling', () => {
+    it('should reject invalid submissionId format', async () => {
+      const requestBody = { submissionId: 'not-a-uuid' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('VALIDATION_ERROR');
+      expect(response.status).toBe(400);
+    });
+
+    it('should reject missing submissionId', async () => {
+      const requestBody = {};
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(response.status).toBe(400);
+    });
+
+    it('should handle submission not found', async () => {
+      mockSubmissionResponse = { data: null, error: { message: 'Not found' } };
+
+      const requestBody = { submissionId: 'nonexistent-submission' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('NOT_FOUND');
+      expect(json.error.message).toContain('Submission not found');
+    });
+
+    it('should handle autoscores insert failure', async () => {
+      mockAutoScoreUpsert = vi.fn(() => ({
+        data: null,
+        error: { message: 'DB error' },
+      })) as any;
+
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('INTERNAL_ERROR');
+      expect(json.error.message).toContain('Failed to save autoscores');
+    });
+
+    it('should handle llmscores insert failure', async () => {
+      mockLLMScoreUpsert = vi.fn(() => ({
+        data: null,
+        error: { message: 'DB error' },
+      })) as any;
+
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('INTERNAL_ERROR');
+      expect(json.error.message).toContain('Failed to save LLM scores');
+    });
+
+    it('should handle status update failure', async () => {
+      mockStatusUpdate = vi.fn(() => ({
+        data: null,
+        error: { message: 'Update failed' },
+      })) as any;
+
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('INTERNAL_ERROR');
+      expect(json.error.message).toContain('Failed to update submission status');
+    });
+  });
+
+  describe('Complete scoring flow', () => {
+    it('should complete full scoring workflow successfully', async () => {
+      const requestBody = { submissionId: 'submission-1' };
+
+      const request = new Request('http://localhost:3000/api/score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const response = await POST(request);
+      const json = await response.json();
+
+      // Verify response
+      expect(json.ok).toBe(true);
+      expect(json.data).toHaveProperty('submissionId', 'submission-1');
+      expect(json.data).toHaveProperty('score_auto');
+      expect(json.data).toHaveProperty('score_llm');
+      expect(json.data).toHaveProperty('status', 'PROVISIONAL');
+
+      // Verify all DB operations were called
+      expect(mockAutoScoreUpsert).toHaveBeenCalledTimes(1);
+      expect(mockLLMScoreUpsert).toHaveBeenCalledTimes(1);
+      expect(mockStatusUpdate).toHaveBeenCalledTimes(1);
+    });
+  });
+});

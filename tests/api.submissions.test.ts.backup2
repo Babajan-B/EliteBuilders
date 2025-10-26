@@ -1,0 +1,348 @@
+/**
+ * Test: Submissions API
+ * Tests POST create with fire-and-forget score trigger
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Set up environment variables
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co';
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key';
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
+process.env.NEXT_PUBLIC_BASE_URL = 'http://localhost:3000';
+
+// Mock challenge data for various test scenarios
+const mockActiveChallenge = {
+  id: 'challenge-1',
+  is_active: true,
+  deadline_utc: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
+};
+
+const mockInactiveChallenge = {
+  id: 'challenge-2',
+  is_active: false,
+  deadline_utc: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+};
+
+const mockExpiredChallenge = {
+  id: 'challenge-3',
+  is_active: true,
+  deadline_utc: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days ago
+};
+
+let mockChallengeResponse: any = { data: mockActiveChallenge, error: null };
+let mockSubmissionResponse: any = {
+  data: {
+    id: 'submission-1',
+    user_id: 'test-user-id',
+    challenge_id: 'challenge-1',
+    repo_url: 'https://github.com/test/repo',
+    deck_url: 'https://deck.test',
+    demo_url: 'https://demo.test',
+    writeup_md: '# Great submission',
+    status: 'SCORING',
+    created_at: new Date().toISOString(),
+  },
+  error: null,
+};
+
+// Mock Supabase client
+const mockSupabaseClient = {
+  from: vi.fn((table: string) => {
+    if (table === 'challenges') {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            single: vi.fn(() => mockChallengeResponse),
+          })),
+        })),
+      };
+    }
+    if (table === 'submissions') {
+      return {
+        insert: vi.fn(() => ({
+          select: vi.fn(() => ({
+            single: vi.fn(() => mockSubmissionResponse),
+          })),
+        })),
+      };
+    }
+    return {
+      select: vi.fn(() => ({})),
+    };
+  }),
+};
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: vi.fn(() => mockSupabaseClient),
+}));
+
+vi.mock('next/headers', () => ({
+  cookies: vi.fn(async () => ({
+    toString: () => '',
+  })),
+}));
+
+// Mock auth
+vi.mock('@/lib/auth', () => ({
+  requireAuth: vi.fn(async () => ({
+    id: 'test-user-id',
+    email: 'test@example.com',
+    role: 'builder',
+  })),
+}));
+
+// Mock global fetch
+const mockFetch = vi.fn(() =>
+  Promise.resolve({
+    ok: true,
+    json: async () => ({ ok: true }),
+  })
+) as any;
+
+// Import after mocks are set up
+import { POST } from '../app/api/submissions/route';
+
+describe('POST /api/submissions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset to default active challenge
+    mockChallengeResponse = { data: mockActiveChallenge, error: null };
+    mockSubmissionResponse = {
+      data: {
+        id: 'submission-1',
+        user_id: 'test-user-id',
+        challenge_id: 'challenge-1',
+        repo_url: 'https://github.com/test/repo',
+        deck_url: 'https://deck.test',
+        demo_url: 'https://demo.test',
+        writeup_md: '# Great submission',
+        status: 'SCORING',
+        created_at: new Date().toISOString(),
+      },
+      error: null,
+    };
+    // Set up global fetch mock
+    global.fetch = mockFetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should create submission with SCORING status', async () => {
+    const requestBody = {
+      challenge_id: 'challenge-1',
+      repo_url: 'https://github.com/test/repo',
+      deck_url: 'https://deck.test',
+      demo_url: 'https://demo.test',
+      writeup_md: '# My amazing submission\n\nThis is a detailed writeup...',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    expect(json).toHaveProperty('ok');
+    expect(json.ok).toBe(true);
+    expect(json).toHaveProperty('data');
+    expect(json.data).toHaveProperty('id');
+    expect(json.data.status).toBe('SCORING');
+    expect(response.status).toBe(201);
+  });
+
+  it('should trigger fire-and-forget score endpoint', async () => {
+    const requestBody = {
+      challenge_id: 'challenge-1',
+      repo_url: 'https://github.com/test/repo',
+      deck_url: 'https://deck.test',
+      demo_url: 'https://demo.test',
+      writeup_md: '# My submission',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    await POST(request);
+
+    // Wait a bit for fire-and-forget to execute
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'http://localhost:3000/api/score',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: expect.stringContaining('submission-1'),
+      })
+    );
+  });
+
+  it('should reject submission for non-existent challenge', async () => {
+    mockChallengeResponse = { data: null, error: { message: 'Not found' } };
+
+    const requestBody = {
+      challenge_id: 'nonexistent-challenge',
+      repo_url: 'https://github.com/test/repo',
+      writeup_md: '# Test',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toBe('NOT_FOUND');
+    expect(json.error.message).toContain('Challenge not found');
+  });
+
+  it('should reject submission for inactive challenge', async () => {
+    mockChallengeResponse = { data: mockInactiveChallenge, error: null };
+
+    const requestBody = {
+      challenge_id: 'challenge-2',
+      repo_url: 'https://github.com/test/repo',
+      writeup_md: '# Test',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toBe('BAD_REQUEST');
+    expect(json.error.message).toContain('not active');
+  });
+
+  it('should reject submission after deadline', async () => {
+    mockChallengeResponse = { data: mockExpiredChallenge, error: null };
+
+    const requestBody = {
+      challenge_id: 'challenge-3',
+      repo_url: 'https://github.com/test/repo',
+      writeup_md: '# Test',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toBe('BAD_REQUEST');
+    expect(json.error.message).toContain('deadline has passed');
+  });
+
+  it('should reject invalid submission data', async () => {
+    const requestBody = {
+      // Missing required challenge_id
+      repo_url: 'https://github.com/test/repo',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    expect(json.ok).toBe(false);
+    expect(json).toHaveProperty('error');
+    expect(response.status).toBe(400);
+  });
+
+  it('should reject invalid URL formats', async () => {
+    const requestBody = {
+      challenge_id: 'challenge-1',
+      repo_url: 'not-a-valid-url',
+      writeup_md: '# Test',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('should handle DB insert errors gracefully', async () => {
+    mockSubmissionResponse = {
+      data: null,
+      error: { message: 'Database error' },
+    };
+
+    const requestBody = {
+      challenge_id: 'challenge-1',
+      repo_url: 'https://github.com/test/repo',
+      writeup_md: '# Test',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    expect(json.ok).toBe(false);
+    expect(json.error.code).toBe('INTERNAL_ERROR');
+    expect(json.error.message).toContain('Failed to create submission');
+  });
+
+  it('should not fail submission creation if scoring trigger fails', async () => {
+    // Mock fetch to reject
+    global.fetch = vi.fn(() => Promise.reject(new Error('Network error'))) as any;
+
+    const requestBody = {
+      challenge_id: 'challenge-1',
+      repo_url: 'https://github.com/test/repo',
+      writeup_md: '# Test',
+    };
+
+    const request = new Request('http://localhost:3000/api/submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+
+    const response = await POST(request);
+    const json = await response.json();
+
+    // Submission should still succeed even if scoring trigger fails
+    expect(json.ok).toBe(true);
+    expect(json.data).toHaveProperty('id');
+    expect(response.status).toBe(201);
+  });
+});
