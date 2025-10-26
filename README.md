@@ -123,18 +123,18 @@ Create `elitebuilders/.env.local`:
 # 🔐 SUPABASE (Required)
 # ===========================
 NEXT_PUBLIC_SUPABASE_URL=https://xxxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=e...
 
 # ===========================
 # 🤖 GOOGLE GEMINI AI (Required)
 # ===========================
-GEMINI_API_KEY=AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+GEMINI_API_KEY=...
 
 # ===========================
 # 📧 MAILERSEND (Optional)
 # ===========================
-MAILERSEND_API_KEY=mlsn.xxxxxxxxxxxxxxxxxxxxxxxxx
+MAILERSEND_API_KEY=...
 MAILERSEND_FROM_EMAIL=noreply@yourdomain.com
 MAILERSEND_FROM_NAME=EliteBuilders
 MAILERSEND_ADMIN_EMAIL=admin@yourdomain.com
