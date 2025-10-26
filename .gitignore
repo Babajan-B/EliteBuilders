@@ -1,0 +1,85 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files - CRITICAL FOR SECURITY
+.env*.local
+.env
+.env.local
+*.env
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Log files
+*.log
+frontend.log
+backend.log
+
+# Process ID files
+*.pid
+.frontend.pid
+.backend.pid
+
+# Temporary and build files
+.elitebuilders/.next/
+elitebuilders/.next/
+*.swp
+*.swo
+*~
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Credentials and secrets
+*.key
+*.pem
+secrets/
+credentials/
+
+# Temporary documentation
+*-FIX.md
+*-FIX.sql
+*DEBUG*.md
+*INSTRUCTIONS*.md
+*_TESTING*.md
+*TEMP*.md
+
+# Script files that may contain secrets
+test-*.js
+send-*.js
+update-*.js
+check-*.js
