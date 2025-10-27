@@ -139,13 +139,30 @@ cd ..
 Create `.env.local` in the root directory:
 
 ```bash
-# Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+# ===========================
+# 🔐 SUPABASE (Required)
+# ===========================
+NEXT_PUBLIC_SUPABASE_URL=https://xxxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=e...
 
-# Google Gemini API (for LLM scoring)
-GEMINI_API_KEY=your_gemini_api_key_here
+# ===========================
+# 🤖 GOOGLE GEMINI AI (Required)
+# ===========================
+GEMINI_API_KEY=...
+
+# ===========================
+# 📧 MAILERSEND (Optional)
+# ===========================
+MAILERSEND_API_KEY=...
+MAILERSEND_FROM_EMAIL=noreply@yourdomain.com
+MAILERSEND_FROM_NAME=EliteBuilders
+MAILERSEND_ADMIN_EMAIL=admin@yourdomain.com
+
+# ===========================
+# 🌐 APPLICATION URL
+# ===========================
+NEXT_PUBLIC_APP_URL=http://localhost:3001
 ```
 
 **Get your credentials:**
