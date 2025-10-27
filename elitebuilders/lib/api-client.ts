@@ -321,7 +321,28 @@ export async function fetchSubmissions(params?: {
       cache: "no-store",
     });
 
-    const result: ApiResponse<BackendSubmission[]> = await response.json();
+    // Check if response is ok and has content
+    if (!response.ok) {
+      console.error("Failed to fetch submissions: HTTP", response.status);
+      return [];
+    }
+
+    // Check if response has content
+    const text = await response.text();
+    if (!text || text.trim() === '') {
+      console.error("Empty response from submissions API");
+      return [];
+    }
+
+    // Try to parse JSON
+    let result: ApiResponse<BackendSubmission[]>;
+    try {
+      result = JSON.parse(text);
+    } catch (parseError) {
+      console.error("Failed to parse submissions response:", parseError);
+      console.error("Response text:", text.substring(0, 200));
+      return [];
+    }
 
     if (!result.ok || !result.data) {
       console.error("Failed to fetch submissions:", result.error);

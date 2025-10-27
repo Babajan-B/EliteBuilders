@@ -174,6 +174,116 @@ export function SubmissionReviewCard({
                     </p>
                   </div>
                   
+                  {/* AI Detailed Analysis Summary */}
+                  {submission.ai_detailed_analysis && (
+                    <div className="space-y-3 mt-4">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-semibold text-base">AI Analysis Report</h4>
+                        <Badge variant="secondary" className="text-xs">
+                          Gemini 2.0
+                        </Badge>
+                      </div>
+                      
+                      {/* Overall Score & Recommendation */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
+                          <div className="text-sm text-blue-600 mb-1">Overall Score</div>
+                          <div className="text-3xl font-bold text-blue-900">
+                            {submission.ai_detailed_analysis.scores?.total || submission.score_llm || 0}
+                            <span className="text-lg text-blue-600">/60</span>
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-lg bg-purple-50 border border-purple-200">
+                          <div className="text-sm text-purple-600 mb-1">Recommendation</div>
+                          <div className={`text-lg font-bold ${
+                            submission.ai_detailed_analysis.recommendation === 'STRONG_ACCEPT' ? 'text-green-600' :
+                            submission.ai_detailed_analysis.recommendation === 'ACCEPT' ? 'text-green-500' :
+                            submission.ai_detailed_analysis.recommendation === 'BORDERLINE' ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {submission.ai_detailed_analysis.recommendation?.replace('_', ' ')}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Score Breakdown */}
+                      {submission.ai_detailed_analysis.scores && (
+                        <div className="p-4 rounded-lg bg-muted/50 border border-border">
+                          <h5 className="font-medium text-sm mb-3">Score Breakdown</h5>
+                          <div className="space-y-2">
+                            {[
+                              { label: 'Problem Fit', value: submission.ai_detailed_analysis.scores.problem_fit, max: 15 },
+                              { label: 'Technical Depth', value: submission.ai_detailed_analysis.scores.tech_depth, max: 15 },
+                              { label: 'UX/Flow', value: submission.ai_detailed_analysis.scores.ux_flow, max: 15 },
+                              { label: 'Impact', value: submission.ai_detailed_analysis.scores.impact, max: 15 }
+                            ].map((item, idx) => (
+                              <div key={idx} className="flex items-center justify-between">
+                                <span className="text-sm text-muted-foreground">{item.label}</span>
+                                <div className="flex items-center gap-2">
+                                  <div className="w-24 bg-muted rounded-full h-2">
+                                    <div 
+                                      className="bg-primary h-2 rounded-full transition-all" 
+                                      style={{ width: `${(item.value / item.max) * 100}%` }}
+                                    ></div>
+                                  </div>
+                                  <span className="text-sm font-semibold min-w-[3rem] text-right">
+                                    {item.value}/{item.max}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Strengths */}
+                      {submission.ai_detailed_analysis.strengths && submission.ai_detailed_analysis.strengths.length > 0 && (
+                        <div className="p-4 rounded-lg bg-green-50 border border-green-200">
+                          <h5 className="font-medium text-sm text-green-900 mb-2 flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4" />
+                            Strengths
+                          </h5>
+                          <ul className="space-y-1">
+                            {submission.ai_detailed_analysis.strengths.map((strength: string, idx: number) => (
+                              <li key={idx} className="text-sm text-green-800 flex items-start gap-2">
+                                <span className="text-green-600 mt-0.5">•</span>
+                                <span>{strength}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Weaknesses */}
+                      {submission.ai_detailed_analysis.weaknesses && submission.ai_detailed_analysis.weaknesses.length > 0 && (
+                        <div className="p-4 rounded-lg bg-yellow-50 border border-yellow-200">
+                          <h5 className="font-medium text-sm text-yellow-900 mb-2 flex items-center gap-2">
+                            <AlertCircle className="h-4 w-4" />
+                            Areas for Improvement
+                          </h5>
+                          <ul className="space-y-1">
+                            {submission.ai_detailed_analysis.weaknesses.map((weakness: string, idx: number) => (
+                              <li key={idx} className="text-sm text-yellow-800 flex items-start gap-2">
+                                <span className="text-yellow-600 mt-0.5">•</span>
+                                <span>{weakness}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* AI Rationale */}
+                      {submission.ai_detailed_analysis.rationale && (
+                        <div className="p-4 rounded-lg bg-purple-50 border border-purple-200">
+                          <h5 className="font-medium text-sm text-purple-900 mb-2">AI Rationale</h5>
+                          <p className="text-sm text-purple-800 whitespace-pre-wrap">
+                            {submission.ai_detailed_analysis.rationale}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                          {/* Enhanced Scoring Breakdown */}
                          <div className="space-y-4">
                            {/* Auto Scoring Section */}

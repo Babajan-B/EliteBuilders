@@ -45,6 +45,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [submissions, setSubmissions] = useState<any[]>([])
+  const [judges, setJudges] = useState<Array<{ id: string; display_name: string; email: string }>>([])
   const [sendingInvite, setSendingInvite] = useState(false)
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   const [showProgress, setShowProgress] = useState(false)
@@ -69,8 +70,21 @@ export default function AdminPage() {
     if (user && user.role === "admin") {
       fetchInvitations()
       fetchSubmissions()
+      fetchJudges()
     }
   }, [user])
+
+  async function fetchJudges() {
+    try {
+      const response = await fetch("/api/admin/users", { credentials: 'include' })
+      if (response.ok) {
+        const data = await response.json()
+        setJudges(data.judges || [])
+      }
+    } catch (error) {
+      console.error("Error fetching judges:", error)
+    }
+  }
 
   async function fetchSubmissions() {
     try {
@@ -115,24 +129,26 @@ export default function AdminPage() {
     }
   }
 
-  async function handleAnalyzeSubmission(submissionId: string) {
+  async function handleAnalyzeSubmission(submissionId: string, forceReanalyze: boolean = false) {
     setAnalyzingId(submissionId)
     setShowProgress(true)
     setError("")
     setSuccess("")
+
+    console.log(`[Admin] Analyzing submission ${submissionId}, force=${forceReanalyze}`)
 
     try {
       const response = await fetch('/api/submissions/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include', // 🔑 Include cookies for auth
-        body: JSON.stringify({ submissionId }),
+        body: JSON.stringify({ submissionId, forceReanalyze }),
       })
 
       const data = await response.json()
 
       if (response.ok) {
-        setSuccess("✨ AI analysis completed successfully!")
+        setSuccess(forceReanalyze ? "✨ Re-analysis completed successfully!" : "✨ AI analysis completed successfully!")
         // Refresh submissions after showing completion
         setTimeout(async () => {
           await fetchSubmissions()
@@ -150,25 +166,63 @@ export default function AdminPage() {
     }
   }
 
-  async function handleSendToJudge(submissionId: string) {
+  async function handleSendToJudge(submissionId: string, judgeId: string) {
     setSendingId(submissionId)
     setError("")
     setSuccess("")
 
+    // Check if this is a reassignment
+    const currentSubmission = submissions.find(s => s.id === submissionId)
+    const isReassignment = currentSubmission?.assigned_judge_id && 
+                          currentSubmission.assigned_judge_id !== judgeId
+    const wasReviewed = currentSubmission?.status === 'REVIEWED' || 
+                       currentSubmission?.status === 'FINAL'
+
+    console.log("🔍 ADMIN: Assigning submission to judge:", {
+      submissionId,
+      judgeId,
+      judgeName: judges.find(j => j.id === judgeId)?.display_name,
+      isReassignment,
+      wasReviewed,
+      previousJudgeId: currentSubmission?.assigned_judge_id
+    })
+
     try {
-      const { error: updateError } = await supabase
+      const { data, error: updateError } = await supabase
         .from("submissions")
-        .update({ status: 'READY_FOR_REVIEW' })
+        .update({ 
+          status: 'READY_FOR_REVIEW',
+          assigned_judge_id: judgeId
+        })
         .eq("id", submissionId)
+        .select()
+
+      console.log("✅ ADMIN: Assignment result:", {
+        success: !updateError,
+        error: updateError,
+        updatedData: data
+      })
 
       if (updateError) {
         throw updateError
       }
 
-      setSuccess("Submission sent to judge successfully!")
+      const judgeName = judges.find(j => j.id === judgeId)?.display_name || "judge"
+      
+      // Show appropriate success message
+      if (wasReviewed) {
+        setSuccess(`✓ Sent to ${judgeName} for second review!`)
+      } else if (isReassignment) {
+        const previousJudgeName = judges.find(j => j.id === currentSubmission?.assigned_judge_id)?.display_name || "previous judge"
+        setSuccess(`✓ Reassigned from ${previousJudgeName} to ${judgeName}!`)
+      } else {
+        setSuccess(`✓ Submission sent to ${judgeName} successfully!`)
+      }
+      
       // Refresh submissions
       await fetchSubmissions()
     } catch (err) {
+      console.error("❌ ADMIN: Failed to assign judge:", err)
       setError("Failed to send submission to judge")
     } finally {
       setSendingId(null)
@@ -353,6 +407,7 @@ export default function AdminPage() {
                       onSendToJudge={handleSendToJudge}
                       analyzing={analyzingId === submission.id}
                       sending={sendingId === submission.id}
+                      judges={judges}
                     />
                   ))}
                 </div>

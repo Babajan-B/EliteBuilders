@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch judges
     const { data: judges, error: judgesError } = await supabase
-      .from('users')
+      .from('profiles')
       .select('id, email, role, display_name, created_at')
       .eq('role', 'judge')
       .order('created_at', { ascending: false });
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch sponsors
     const { data: sponsors, error: sponsorsError } = await supabase
-      .from('users')
+      .from('profiles')
       .select('id, email, role, display_name, created_at')
       .eq('role', 'sponsor')
       .order('created_at', { ascending: false });

@@ -5,15 +5,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Loader2, Eye, Sparkles, Send, Github, ExternalLink, FileText } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Label } from "@/components/ui/label"
+import { Loader2, Eye, Sparkles, Send, Github, ExternalLink, FileText, RotateCw } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
+import { DetailedAnalysisReport } from "./detailed-analysis-report"
 
 interface AdminSubmissionCardProps {
   submission: any
-  onAnalyze: (id: string) => void
-  onSendToJudge: (id: string) => void
+  onAnalyze: (id: string, forceReanalyze?: boolean) => void
+  onSendToJudge: (id: string, judgeId: string) => void
   analyzing: boolean
   sending: boolean
+  judges: Array<{ id: string; display_name: string; email: string }>
 }
 
 export function AdminSubmissionCard({ 
@@ -21,9 +25,11 @@ export function AdminSubmissionCard({
   onAnalyze, 
   onSendToJudge,
   analyzing,
-  sending 
+  sending,
+  judges 
 }: AdminSubmissionCardProps) {
   const [showDetails, setShowDetails] = useState(false)
+  const [selectedJudgeId, setSelectedJudgeId] = useState<string>(submission.assigned_judge_id || "")
 
   const statusColors = {
     PENDING: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
@@ -154,7 +160,7 @@ export function AdminSubmissionCard({
         </div>
 
         <div className="flex gap-2">
-          {submission.status === 'PENDING' && (
+          {(submission.status === 'PENDING' || submission.status === 'ANALYZING') && (
             <Button 
               onClick={() => onAnalyze(submission.id)} 
               disabled={analyzing}
@@ -175,32 +181,210 @@ export function AdminSubmissionCard({
           )}
           
           {submission.status === 'ANALYZED' && (
-            <Button 
-              onClick={() => onSendToJudge(submission.id)} 
-              disabled={sending}
-              size="sm"
-              variant="default"
-            >
-              {sending ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <Send className="h-4 w-4 mr-2" />
-                  Send to Judge
-                </>
-              )}
-            </Button>
+            <>
+              <div className="flex items-center gap-2 flex-1">
+                <Select value={selectedJudgeId} onValueChange={setSelectedJudgeId}>
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Select Judge" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {judges.map((judge) => (
+                      <SelectItem key={judge.id} value={judge.id}>
+                        {judge.display_name || judge.email}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button 
+                  onClick={() => selectedJudgeId && onSendToJudge(submission.id, selectedJudgeId)} 
+                  disabled={sending || !selectedJudgeId}
+                  size="sm"
+                  variant="default"
+                >
+                  {sending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-2" />
+                      Send to Judge
+                    </>
+                  )}
+                </Button>
+              </div>
+              <Button 
+                onClick={() => onAnalyze(submission.id, true)} 
+                disabled={analyzing}
+                size="sm"
+                variant="outline"
+                title="Force re-analysis even if already analyzed"
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Re-analyzing...
+                  </>
+                ) : (
+                  <>
+                    <RotateCw className="h-4 w-4 mr-2" />
+                    Re-run Analysis
+                  </>
+                )}
+              </Button>
+            </>
           )}
 
           {submission.status === 'READY_FOR_REVIEW' && (
-            <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">
-              ✓ Sent to Judge
-            </Badge>
+            <>
+              <div className="flex items-center gap-2 flex-1">
+                <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">
+                  ✓ Sent to Judge
+                </Badge>
+                {submission.assigned_judge_id && judges.find(j => j.id === submission.assigned_judge_id) && (
+                  <Badge variant="secondary">
+                    Current: {judges.find(j => j.id === submission.assigned_judge_id)?.display_name}
+                  </Badge>
+                )}
+                
+                {/* Allow reassignment to different judge */}
+                <div className="flex items-center gap-2 ml-auto">
+                  <Select value={selectedJudgeId} onValueChange={setSelectedJudgeId}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Reassign to..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {judges.map((judge) => (
+                        <SelectItem key={judge.id} value={judge.id}>
+                          {judge.display_name || judge.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button 
+                    onClick={() => selectedJudgeId && onSendToJudge(submission.id, selectedJudgeId)} 
+                    disabled={sending || !selectedJudgeId}
+                    size="sm"
+                    variant="outline"
+                    title="Reassign to different judge or send to multiple judges"
+                  >
+                    {sending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-2" />
+                        Reassign
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <Button 
+                onClick={() => onAnalyze(submission.id, true)} 
+                disabled={analyzing}
+                size="sm"
+                variant="outline"
+                title="Force re-analysis even if already analyzed"
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Re-analyzing...
+                  </>
+                ) : (
+                  <>
+                    <RotateCw className="h-4 w-4 mr-2" />
+                    Re-run Analysis
+                  </>
+                )}
+              </Button>
+            </>
+          )}
+
+          {/* REVIEWED or FINAL status - allow reassignment for second opinion */}
+          {(submission.status === 'REVIEWED' || submission.status === 'FINAL') && (
+            <>
+              <div className="flex items-center gap-2 flex-1">
+                <Badge variant="outline" className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+                  {submission.status === 'REVIEWED' ? '✓ Reviewed' : '✓ Final'}
+                </Badge>
+                {submission.assigned_judge_id && judges.find(j => j.id === submission.assigned_judge_id) && (
+                  <Badge variant="secondary">
+                    Reviewed by: {judges.find(j => j.id === submission.assigned_judge_id)?.display_name}
+                  </Badge>
+                )}
+                
+                {/* Allow sending to another judge for second opinion */}
+                <div className="flex items-center gap-2 ml-auto">
+                  <Select value={selectedJudgeId} onValueChange={setSelectedJudgeId}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Send for 2nd review..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {judges.map((judge) => (
+                        <SelectItem key={judge.id} value={judge.id}>
+                          {judge.display_name || judge.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button 
+                    onClick={() => selectedJudgeId && onSendToJudge(submission.id, selectedJudgeId)} 
+                    disabled={sending || !selectedJudgeId}
+                    size="sm"
+                    variant="outline"
+                    title="Send to another judge for second opinion"
+                  >
+                    {sending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Sending...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4 mr-2" />
+                        2nd Review
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <Button 
+                onClick={() => onAnalyze(submission.id, true)} 
+                disabled={analyzing}
+                size="sm"
+                variant="outline"
+                title="Force re-analysis even if already analyzed"
+              >
+                {analyzing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Re-analyzing...
+                  </>
+                ) : (
+                  <>
+                    <RotateCw className="h-4 w-4 mr-2" />
+                    Re-run Analysis
+                  </>
+                )}
+              </Button>
+            </>
           )}
         </div>
+        
+        {/* Show detailed analysis if available */}
+        {submission.ai_detailed_analysis && (
+          <div className="mt-4 pt-4 border-t">
+            <DetailedAnalysisReport 
+              analysis={submission.ai_detailed_analysis}
+              submissionId={submission.id}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   )

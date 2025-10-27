@@ -33,14 +33,18 @@ export interface AIAnalysisResult {
 /**
  * Analyze a submission using AI and store results
  * This function is called automatically after a submission is created
+ * @param submissionId - The UUID of the submission to analyze
+ * @param forceReanalyze - If true, will re-analyze even if already analyzed
  */
 export async function analyzeSubmissionWithAI(
-  submissionId: string
+  submissionId: string,
+  forceReanalyze: boolean = false
 ): Promise<AIAnalysisResult | null> {
   const supabase = getSupabaseBrowserClient();
 
   try {
     console.log(`[AI Analysis] Starting analysis for submission ${submissionId}`);
+    console.log(`[AI Analysis] Force reanalyze: ${forceReanalyze}`);
 
     // 1. Fetch the submission
     const { data: submission, error: fetchError } = await supabase
@@ -56,8 +60,8 @@ export async function analyzeSubmissionWithAI(
 
     const sub = submission as any; // Type cast for Supabase types
 
-    // 2. Check if already analyzed
-    if (sub.ai_analyzed_at) {
+    // 2. Check if already analyzed (skip only if not forcing reanalysis)
+    if (sub.ai_analyzed_at && !forceReanalyze) {
       console.log('[AI Analysis] Submission already analyzed, skipping');
       return {
         score_llm: sub.score_llm,
@@ -65,6 +69,10 @@ export async function analyzeSubmissionWithAI(
         rationale_md: sub.rationale_md,
         ai_analyzed_at: sub.ai_analyzed_at,
       };
+    }
+
+    if (forceReanalyze && sub.ai_analyzed_at) {
+      console.log('[AI Analysis] ⚠️ FORCE RE-ANALYSIS - Previous analysis will be overwritten');
     }
 
     // 3. Update status to ANALYZING

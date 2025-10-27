@@ -26,37 +26,46 @@ export async function POST(request: Request) {
 
     const supabase = await getSupabaseServerClient()
 
-    // Update submission
-    const { data: submission, error: updateError } = await supabase
-      .from("submissions")
-      .update({
-        status,
-        score,
-        feedback,
-        reviewed_at: new Date().toISOString(),
-        reviewed_by: user.id,
-      })
-      .eq("id", submission_id)
-      .select("*, users(id, total_points)")
-      .single()
+    console.log("🔍 JUDGE API: Updating submission:", {
+      submission_id,
+      status,
+      score,
+      feedback: feedback?.substring(0, 50) + "...",
+      userId: user.id,
+      userRole: user.role
+    })
 
-    if (updateError) {
-      console.error("[v0] Review update error:", updateError)
-      return NextResponse.json({ error: "Failed to update submission" }, { status: 500 })
+    // Simple update: just status and basic review data
+    // The status will be updated to REVIEWED when judge completes review
+    const updateData: any = {
+      status: "REVIEWED",  // Mark as reviewed by judge
+    }
+    
+    // Only add fields if they're provided
+    if (feedback) {
+      updateData.rationale_md = feedback  // Use rationale_md for feedback
     }
 
-    // Update user's total points if approved with score
-    if (status === "approved" && score !== null) {
-      const currentPoints = submission.users?.total_points || 0
-      const previousScore = submission.score || 0
-      const pointsDiff = score - previousScore
+    const { data: submission, error: updateError } = await supabase
+      .from("submissions")
+      .update(updateData)
+      .eq("id", submission_id)
+      .select()
+      .single()
 
-      await supabase
-        .from("users")
-        .update({
-          total_points: currentPoints + pointsDiff,
-        })
-        .eq("id", submission.user_id)
+    console.log("✅ JUDGE API: Update result:", {
+      success: !updateError,
+      error: updateError,
+      submissionId: submission?.id,
+      newStatus: submission?.status
+    })
+
+    if (updateError) {
+      console.error("❌ JUDGE API: Review update error:", updateError)
+      return NextResponse.json({ 
+        error: "Failed to update submission", 
+        details: updateError.message 
+      }, { status: 500 })
     }
 
     return NextResponse.json({ submission })

@@ -1,9 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server"
 
 export async function middleware(request: NextRequest) {
+  // Clone the response
+  const response = NextResponse.next()
+
+  // In development, add aggressive no-cache headers to prevent caching issues
+  if (process.env.NODE_ENV === 'development') {
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0')
+    response.headers.set('Pragma', 'no-cache')
+    response.headers.set('Expires', '0')
+    response.headers.set('X-Timestamp', Date.now().toString())
+  }
+
+  return response
+
   // For now, allow all routes without authentication
   // This lets you preview the frontend without database setup
-  return NextResponse.next()
 
   /* 
   // Uncomment this section when you're ready to integrate the database:

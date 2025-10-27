@@ -7,17 +7,30 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SubmissionReviewCard } from "@/components/judge/submission-review-card"
 import { ClipboardList, CheckCircle2, XCircle, Clock } from "lucide-react"
 import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import { useAuth } from "@/components/auth/auth-provider"
 
 export default function JudgeConsolePage() {
   const [allSubmissions, setAllSubmissions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const { user } = useAuth()
   const supabase = getSupabaseBrowserClient()
 
   useEffect(() => {
     async function fetchSubmissions() {
-      console.log("🔍 JUDGE: Starting fetch...")
+      if (!user) {
+        console.log("⚠️ JUDGE: No user found, skipping fetch")
+        setLoading(false)
+        return
+      }
+
+      console.log("🔍 JUDGE: Starting fetch for judge:", {
+        userId: user.id,
+        userEmail: user.email,
+        userRole: user.role
+      })
+      
       try {
-        // Fetch only submissions that are ready for judge review
+        // Fetch only submissions assigned to this judge
         const { data, error } = await supabase
           .from("submissions")
           .select(`
@@ -31,13 +44,20 @@ export default function JudgeConsolePage() {
               display_name
             )
           `)
-          .eq("status", "READY_FOR_REVIEW")  // Only show submissions sent by admin
+          .eq("assigned_judge_id", user.id)  // Filter by assigned judge
+          .eq("status", "READY_FOR_REVIEW")  // Only show ready submissions
           .order("created_at", { ascending: false })
 
         console.log("🔍 JUDGE: Query result:", {
+          userId: user.id,
           dataCount: data?.length,
           error: error,
-          sampleData: data?.[0]
+          submissions: data?.map(s => ({
+            id: s.id,
+            status: s.status,
+            assigned_judge_id: s.assigned_judge_id,
+            challenge: s.challenges?.title
+          }))
         })
 
         if (error) {
@@ -56,11 +76,18 @@ export default function JudgeConsolePage() {
     }
 
     fetchSubmissions()
-  }, [supabase])
+  }, [supabase, user])
 
-  const pendingSubmissions = allSubmissions.filter((s: any) => s.status === "PROVISIONAL" || s.status === "SCORING")
-  const approvedSubmissions = allSubmissions.filter((s: any) => s.status === "FINAL" && s.score_display && s.score_display >= 70)
-  const rejectedSubmissions = allSubmissions.filter((s: any) => s.status === "FINAL" && s.score_display && s.score_display < 70)
+  // Fix: Show READY_FOR_REVIEW submissions in pending tab
+  const pendingSubmissions = allSubmissions.filter((s: any) => 
+    s.status === "READY_FOR_REVIEW" || s.status === "PROVISIONAL" || s.status === "SCORING"
+  )
+  const approvedSubmissions = allSubmissions.filter((s: any) => 
+    s.status === "REVIEWED" || (s.status === "FINAL" && s.score_display && s.score_display >= 70)
+  )
+  const rejectedSubmissions = allSubmissions.filter((s: any) => 
+    s.status === "FINAL" && s.score_display && s.score_display < 70
+  )
 
   if (loading) {
     return (

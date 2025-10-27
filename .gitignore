@@ -51,6 +51,7 @@ backend.log
 # Temporary and build files
 .elitebuilders/.next/
 elitebuilders/.next/
+elitebuilders-backend/.next/
 *.swp
 *.swo
 *~
@@ -70,7 +71,80 @@ Thumbs.db
 secrets/
 credentials/
 
-# Temporary documentation
+# ============================================
+# DOCUMENTATION FILES TO IGNORE
+# ============================================
+
+# All temporary documentation and guides
+ACTION_PLAN.md
+ADMIN_INVITATION_GUIDE.md
+ADMIN_SETUP.md
+AI_ANALYSIS_IMPLEMENTATION_GUIDE.md
+API.md
+AUTH_FIXES_AND_ADMIN.md
+CHANGELOG.md
+CHECK_SIGNIN_PAGE.md
+CLEAR_LOGIN_ERROR.md
+COMPLETE_FIX_GUIDE.md
+COMPLETE_FIX_INSTRUCTIONS.md
+COMPLETE_INVITATION_SETUP.md
+COMPLETE_SETUP_GUIDE.md
+COMPLETE_TESTING_REPORT.md
+COMPLETED.md
+CONSTRAINT_FIX_NOTE.md
+DASHBOARD_FIXED.md
+DATABASE_CHECK_RESULTS.md
+DATABASE_FIX_GUIDE.md
+DATABASE_FIX_SUMMARY.md
+DB_SMOKE_TEST.md
+DB-API.md
+DISABLE_EMAIL_FOREVER.md
+EMAIL_FIX_APPLIED.md
+EMAIL_TEST_INSTRUCTIONS.md
+EXACT_STEPS_TO_FIX.md
+FINAL_FIX_SIGNUP.md
+FINAL_SQL_FIX.md
+FIX_EMAIL_CONFIRMATION.md
+FIX_PROFILE_ERROR.md
+FIX_SUPABASE_AUTH_ERROR.md
+FIX_UI_PROFILE_ERROR.md
+FRONTEND_FIXES.md
+GET_NEW_SUPABASE_KEYS.md
+GET_SUPABASE_KEYS.md
+HOW_TO_FIX_SIGNUP.md
+IMPLEMENTATION_COMPLETE.md
+IMPLEMENTATION_GUIDE.md
+IMPLEMENTATION_SUMMARY.md
+INSTALL_TRIGGER_NOW.md
+INTEGRATION_SMOKE_TEST.md
+INTEGRATION.md
+INVITATION_SYSTEM_COMPLETE.md
+LLM-INTEGRATION.md
+NEW_DASHBOARD_SUMMARY.md
+Project.md
+QUICK_FIX_SUMMARY.md
+QUICK_START.md
+READ_ME_FIRST.md
+README_ADMIN_FEATURES.md
+RESTART_FRONTEND.md
+RUN_THESE_STEPS.md
+RUN_THIS_NOW.md
+SIGNUP_ERROR_TROUBLESHOOTING.md
+SIGNUP_FIX_CHECKLIST.md
+SIGNUP_FIX_DIAGRAM.md
+SIMPLE_INSTRUCTIONS.md
+SQL_MIGRATION_FIX.md
+
+# Sponsor Dashboard specific docs
+START_HERE.md
+QUICK_REFERENCE.md
+FILE_INDEX.md
+SPONSOR_DASHBOARD_READY.md
+SPONSOR_DASHBOARD_IMPLEMENTATION.md
+SPONSOR_DASHBOARD_SUMMARY.md
+PACKAGE_OVERVIEW.md
+
+# Pattern-based documentation
 *-FIX.md
 *-FIX.sql
 *DEBUG*.md
@@ -78,11 +152,96 @@ credentials/
 *_TESTING*.md
 *TEMP*.md
 
-# Archive directory with documentation and SQL migrations
-.archive/
+# ============================================
+# SQL FILES TO IGNORE
+# ============================================
 
-# Script files that may contain secrets
+# All SQL migration and setup files
+*.sql
+ADD_AI_ANALYSIS_FIELDS.sql
+CHECK_ACTUAL_ADMIN.sql
+CHECK_ADMIN_STATUS.sql
+CHECK_DATABASE_STATUS.sql
+CHECK_USER_EXISTS.sql
+CLEAN_RLS_POLICIES.sql
+COMPLETE_DATABASE_SETUP.sql
+COMPLETE_MIGRATION_WITH_SAMPLE_DATA.sql
+COMPLETE_SIGNUP_FIX_ALL_IN_ONE.sql
+CREATE_ADMIN_COMPLETE.sql
+CREATE_ADMIN.sql
+CREATE_INVITATIONS_TABLE.sql
+CREATE_MISSING_PROFILE.sql
+CREATE_SPONSOR_ORG.sql
+DISABLE_EMAIL_CONFIRMATION.sql
+FIX_ADMIN_NAME.sql
+FIX_ALL_PROFILE_ISSUES.sql
+FIX_EXISTING_USERS.sql
+FIX_NOW.sql
+FIX_RLS_INFINITE_RECURSION.sql
+FIX_SIGNUP_WITH_TRIGGER.sql
+FIX_SPONSOR_ORG.sql
+RUN_SIGNUP_TRIGGER_FIX.sql
+RUN_THIS_SQL.sql
+SET_ADMIN_NOW.sql
+SET_CORRECT_ADMIN.sql
+SPONSOR_DASHBOARD_SCHEMA.sql
+
+# Database folders
+supabase/
+database/
+migrations/
+
+# ============================================
+# SCRIPTS TO IGNORE
+# ============================================
+
+# Shell scripts (development helpers)
+dev-server.sh
+restart-servers.sh
+send-invitation.sh
+deploy-sponsor-dashboard.sh
+
+# JavaScript utility scripts
+send-email-direct.js
 test-*.js
 send-*.js
 update-*.js
 check-*.js
+
+# ============================================
+# COMPONENT BACKUPS
+# ============================================
+
+# Backup components and pages
+*-backup.*
+*-backup.tsx
+*.backup
+*.bak
+*.old
+NEW_SPONSOR_DASHBOARD.tsx
+elitebuilders/app/sponsor/page-backup.tsx
+
+# ============================================
+# ARCHIVE & TEMPORARY FILES
+# ============================================
+
+# Archive directory
+.archive/
+archive/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# ============================================
+# IMPORTANT: These files ARE tracked
+# ============================================
+# README.md - Main documentation (kept)
+# package.json - Dependencies (kept)
+# package-lock.json - Lock file (kept)
+# next.config.js / next.config.mjs - Configuration (kept)
+# tsconfig.json - TypeScript config (kept)
+# tailwind.config.ts - Tailwind config (kept)
+# postcss.config.js - PostCSS config (kept)
+

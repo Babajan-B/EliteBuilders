@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     console.log('🚀 POST /api/submissions/analyze - Starting...');
 
     const body = await request.json();
-    const { submissionId } = body;
+    const { submissionId, forceReanalyze } = body;
 
     if (!submissionId) {
       return NextResponse.json(
@@ -24,6 +24,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    console.log(`[API] Force reanalyze: ${forceReanalyze ? 'YES' : 'NO'}`);
 
     // Create Supabase client with cookies
     console.log('👤 Creating Supabase client with cookies...');
@@ -97,7 +99,7 @@ export async function POST(request: NextRequest) {
     console.log(`[API] 🚀 Triggering AI analysis for submission ${submissionId}`);
     console.log(`[API] 👤 Requested by: ${user.email} (${user.role})`);
     
-    const result = await analyzeSubmissionWithAI(submissionId);
+    const result = await analyzeSubmissionWithAI(submissionId, forceReanalyze);
 
     if (!result) {
       console.error(`[API] ❌ AI analysis failed for submission ${submissionId}`);

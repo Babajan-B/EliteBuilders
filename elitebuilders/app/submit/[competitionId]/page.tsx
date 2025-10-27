@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { use, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Header } from "@/components/layout/header"
 import { SubmissionForm } from "@/components/submissions/submission-form"
@@ -14,9 +14,9 @@ import { useAuth } from "@/components/auth/auth-provider"
 export default function SubmitPage({
   params,
 }: {
-  params: { competitionId: string }
+  params: Promise<{ competitionId: string }>
 }) {
-  const { competitionId } = params
+  const { competitionId } = use(params)
   const router = useRouter()
   const { user, loading: authLoading } = useAuth()
   const [competition, setCompetition] = useState<any>(null)
