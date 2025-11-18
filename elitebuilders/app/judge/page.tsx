@@ -4,15 +4,16 @@ import { useEffect, useState } from "react"
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
 import { SubmissionReviewCard } from "@/components/judge/submission-review-card"
-import { ClipboardList, CheckCircle2, XCircle, Clock } from "lucide-react"
+import { ClipboardList, CheckCircle2, XCircle, Clock, AlertCircle, RefreshCcw } from "lucide-react"
 import { getSupabaseBrowserClient } from "@/lib/supabase/client"
 import { useAuth } from "@/components/auth/auth-provider"
 
 export default function JudgeConsolePage() {
   const [allSubmissions, setAllSubmissions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const { user } = useAuth()
+  const { user, loading: authLoading, error: authError, retryAuth } = useAuth()
   const supabase = getSupabaseBrowserClient()
 
   useEffect(() => {
@@ -89,7 +90,7 @@ export default function JudgeConsolePage() {
     s.status === "FINAL" && s.score_display && s.score_display < 70
   )
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
@@ -97,6 +98,31 @@ export default function JudgeConsolePage() {
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (authError) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="container mx-auto px-4 py-8 max-w-7xl">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-5 w-5" />
+                <h2 className="text-lg font-semibold">Authentication Error</h2>
+              </div>
+              <CardDescription>{authError}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={retryAuth} className="w-full">
+                <RefreshCcw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </div>
     )

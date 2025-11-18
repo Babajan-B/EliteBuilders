@@ -20,7 +20,9 @@ import {
   UserPlus,
   Building2,
   Gavel,
-  FileText
+  FileText,
+  AlertCircle,
+  RefreshCcw
 } from "lucide-react"
 import { getSupabaseBrowserClient } from "@/lib/supabase/client"
 import { useAuth } from "@/components/auth/auth-provider"
@@ -41,7 +43,7 @@ interface Invitation {
 
 export default function AdminPage() {
   const router = useRouter()
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, error: authError, retryAuth } = useAuth()
   const [loading, setLoading] = useState(true)
   const [invitations, setInvitations] = useState<Invitation[]>([])
   const [submissions, setSubmissions] = useState<any[]>([])
@@ -276,6 +278,31 @@ export default function AdminPage() {
           <div className="flex items-center justify-center py-12">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
           </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (authError) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="container mx-auto px-4 py-8 max-w-7xl">
+          <Card className="max-w-lg mx-auto">
+            <CardHeader>
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-5 w-5" />
+                <CardTitle>Authentication Error</CardTitle>
+              </div>
+              <CardDescription>{authError}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={retryAuth} className="w-full">
+                <RefreshCcw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </div>
     )
