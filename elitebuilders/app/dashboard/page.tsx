@@ -19,10 +19,13 @@ import {
   ExternalLink,
   Plus,
   Target,
+  AlertCircle,
+  RefreshCcw,
 } from "lucide-react"
 import Link from "next/link"
 import { format, formatDistanceToNow } from "date-fns"
 import { getSupabaseBrowserClient } from "@/lib/supabase/client"
+import { useAuth } from "@/components/auth/auth-provider"
 
 interface UserStats {
   totalSubmissions: number
@@ -34,9 +37,8 @@ interface UserStats {
 export default function DashboardPage() {
   const router = useRouter()
   const supabase = getSupabaseBrowserClient()
+  const { user, loading: authLoading, error: authError, retryAuth } = useAuth()
   const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState<any>(null)
-  const [profile, setProfile] = useState<any>(null)
   const [stats, setStats] = useState<UserStats>({
     totalSubmissions: 0,
     approvedSubmissions: 0,
@@ -46,49 +48,33 @@ export default function DashboardPage() {
   const [competitions, setCompetitions] = useState<any[]>([])
   const [recentSubmissions, setRecentSubmissions] = useState<any[]>([])
 
+  // Redirect non-builder users to their appropriate dashboards
+  useEffect(() => {
+    if (!authLoading && user) {
+      if (user.role === "admin") {
+        router.push("/admin")
+      } else if (user.role === "sponsor") {
+        router.push("/sponsor")
+      } else if (user.role === "judge") {
+        router.push("/judge")
+      }
+    }
+  }, [user, authLoading, router])
+
   useEffect(() => {
     async function loadDashboard() {
+      if (!user || user.role !== "builder") {
+        setLoading(false)
+        return
+      }
+
       try {
-        // Get current user
-        const { data: { user: authUser }, error: userError } = await supabase.auth.getUser()
-
-        if (userError || !authUser) {
-          router.push("/auth/signin?redirect=/dashboard")
-          return
-        }
-
-        setUser(authUser)
-
-        // Fetch user profile
-        const { data: profileData, error: profileError } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", authUser.id)
-          .single()
-
-        if (profileError) {
-          console.error("Profile fetch error:", profileError)
-        } else if (profileData) {
-          setProfile(profileData)
-
-          // Redirect if not builder
-          if ((profileData as any)?.role === "admin") {
-            router.push("/admin")
-            return
-          } else if ((profileData as any)?.role === "sponsor") {
-            router.push("/sponsor")
-            return
-          } else if ((profileData as any)?.role === "judge") {
-            router.push("/judge")
-            return
-          }
-        }
 
         // Fetch user submissions
         const { data: submissionsData, error: submissionsError } = await supabase
           .from("submissions")
           .select("*")
-          .eq("user_id", authUser.id)
+          .eq("user_id", user.id)
           .order("created_at", { ascending: false })
 
         if (!submissionsError && submissionsData) {
@@ -170,8 +156,10 @@ export default function DashboardPage() {
       }
     }
 
-    loadDashboard()
-  }, [router, supabase])
+    if (!authLoading) {
+      loadDashboard()
+    }
+  }, [user, authLoading, supabase])
 
   const statusColors = {
     pending: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
@@ -179,7 +167,7 @@ export default function DashboardPage() {
     rejected: "bg-red-500/10 text-red-500 border-red-500/20",
   }
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
@@ -192,6 +180,36 @@ export default function DashboardPage() {
     )
   }
 
+  if (authError) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="container mx-auto px-4 py-8">
+          <Card className="max-w-lg mx-auto">
+            <CardHeader>
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-5 w-5" />
+                <CardTitle>Authentication Error</CardTitle>
+              </div>
+              <CardDescription>{authError}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={retryAuth} className="w-full">
+                <RefreshCcw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    router.push("/auth/signin?redirect=/dashboard")
+    return null
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -201,7 +219,7 @@ export default function DashboardPage() {
         {/* Welcome Section */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">
-            Welcome back, {profile?.display_name || user?.email || "Builder"}!
+            Welcome back, {user?.name || user?.email || "Builder"}!
           </h1>
           <p className="text-lg text-muted-foreground">
             Here's your overview of competitions and submissions

@@ -16,6 +16,8 @@ export interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null
   loading: boolean
+  error: string | null
+  retryAuth: () => Promise<void>
   signOut: () => Promise<void>
   signIn: (email: string, password: string) => Promise<void>
 }
@@ -23,6 +25,8 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: false,
+  error: null,
+  retryAuth: async () => {},
   signOut: async () => {},
   signIn: async () => {},
 })
@@ -30,6 +34,7 @@ const AuthContext = createContext<AuthContextType>({
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const supabase = getSupabaseBrowserClient()
   const router = useRouter()
 
@@ -53,19 +58,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [supabase])
 
-  async function checkUser() {
+  async function checkUser(retryCount = 0) {
+    const maxRetries = 3
+
     try {
+      setError(null)
       const { data: { user: authUser } } = await supabase.auth.getUser()
 
       if (authUser) {
         console.log("AuthProvider: User authenticated:", authUser.id)
-        
-        // Fetch user profile from database
-        const { data: profile, error: profileError } = await supabase
+
+        // Fetch user profile from database with timeout
+        const profilePromise = supabase
           .from("profiles")
           .select("*")
           .eq("id", authUser.id)
           .single()
+
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Profile fetch timeout')), 10000)
+        )
+
+        const { data: profile, error: profileError } = await Promise.race([
+          profilePromise,
+          timeoutPromise
+        ]) as { data: any, error: any }
 
         if (profileError) {
           console.error("AuthProvider: Profile fetch error:", profileError)
@@ -73,18 +90,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             message: profileError.message,
             details: profileError.details,
             hint: profileError.hint,
-            code: profileError.code
+            code: profileError.code,
+            retryCount
           })
-          
-          // If profile doesn't exist, use auth user data temporarily
-          // The trigger should create it, or we need to run CREATE_MISSING_PROFILE.sql
-          console.warn("AuthProvider: Profile not found, using auth user data")
-          setUser({
-            id: authUser.id,
-            email: authUser.email || "",
-            role: "builder",
-            name: authUser.user_metadata?.name || authUser.email?.split('@')[0] || "User",
-          })
+
+          // Retry logic for transient errors
+          if (retryCount < maxRetries && (
+            profileError.message?.includes('timeout') ||
+            profileError.message?.includes('network') ||
+            profileError.code === 'PGRST116' // Row not found - might be timing issue with trigger
+          )) {
+            console.log(`AuthProvider: Retrying profile fetch (${retryCount + 1}/${maxRetries})...`)
+            await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1))) // Exponential backoff
+            return checkUser(retryCount + 1)
+          }
+
+          // If profile genuinely doesn't exist after retries, set error
+          setError("Failed to load user profile. Please try refreshing the page.")
+          setUser(null)
           setLoading(false)
           return
         }
@@ -102,26 +125,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             role: profile.role || "builder",
             name: profile.display_name || authUser.user_metadata?.name || "",
           })
+          setError(null)
         } else {
-          console.warn("AuthProvider: No profile data returned")
-          // Use auth user data as fallback
-          setUser({
-            id: authUser.id,
-            email: authUser.email || "",
-            role: "builder",
-            name: authUser.user_metadata?.name || authUser.email?.split('@')[0] || "User",
-          })
+          console.error("AuthProvider: No profile data returned after successful query")
+          setError("User profile is empty. Please contact support.")
+          setUser(null)
         }
       } else {
         console.log("AuthProvider: No authenticated user")
         setUser(null)
+        setError(null)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("AuthProvider: Error checking user:", error)
+
+      // Retry on timeout or network errors
+      if (retryCount < maxRetries && (
+        error.message?.includes('timeout') ||
+        error.message?.includes('network') ||
+        error.message?.includes('fetch')
+      )) {
+        console.log(`AuthProvider: Retrying after error (${retryCount + 1}/${maxRetries})...`)
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)))
+        return checkUser(retryCount + 1)
+      }
+
+      setError(error.message || "Authentication error. Please try again.")
       setUser(null)
     } finally {
       setLoading(false)
     }
+  }
+
+  async function retryAuth() {
+    setLoading(true)
+    await checkUser(0)
   }
 
   async function signIn(email: string, password: string) {
@@ -143,7 +181,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push("/")
   }
 
-  return <AuthContext.Provider value={{ user, loading, signOut, signIn }}>{children}</AuthContext.Provider>
+  return <AuthContext.Provider value={{ user, loading, error, retryAuth, signOut, signIn }}>{children}</AuthContext.Provider>
 }
 
 export const useAuth = () => useContext(AuthContext)
